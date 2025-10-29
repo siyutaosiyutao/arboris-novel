@@ -83,6 +83,7 @@ from ..models import (
     NovelBlueprint,
     NovelConversation,
     NovelProject,
+    Volume,
 )
 from ..repositories.novel_repository import NovelRepository
 from ..schemas.admin import AdminNovelSummary
@@ -95,6 +96,7 @@ from ..schemas.novel import (
     NovelProjectSummary,
     NovelSectionResponse,
     NovelSectionType,
+    Volume as VolumeSchema,
 )
 
 
@@ -289,11 +291,45 @@ class NovelService:
                 )
             )
 
+        # 处理分卷
+        await self.session.execute(delete(Volume).where(Volume.project_id == project_id))
+        volume_id_map = {}  # volume_number -> volume_id
+        for volume in blueprint.volumes:
+            vol_record = Volume(
+                project_id=project_id,
+                volume_number=volume.volume_number,
+                title=volume.title,
+                description=volume.description,
+            )
+            self.session.add(vol_record)
+            await self.session.flush()  # 获取ID
+            volume_id_map[volume.volume_number] = vol_record.id
+
+        # 如果没有分卷,创建默认分卷
+        if not blueprint.volumes:
+            default_volume = Volume(
+                project_id=project_id,
+                volume_number=1,
+                title="默认",
+                description="第一卷",
+            )
+            self.session.add(default_volume)
+            await self.session.flush()
+            volume_id_map[1] = default_volume.id
+
         await self.session.execute(delete(ChapterOutline).where(ChapterOutline.project_id == project_id))
         for outline in blueprint.chapter_outline:
+            # 确定章节所属分卷
+            volume_id = None
+            if outline.volume_number and outline.volume_number in volume_id_map:
+                volume_id = volume_id_map[outline.volume_number]
+            elif 1 in volume_id_map:
+                volume_id = volume_id_map[1]  # 默认第一卷
+
             self.session.add(
                 ChapterOutline(
                     project_id=project_id,
+                    volume_id=volume_id,
                     chapter_number=outline.chapter_number,
                     title=outline.title,
                     summary=outline.summary,
@@ -392,7 +428,46 @@ class NovelService:
         chapter = result.scalars().first()
         if chapter:
             return chapter
-        chapter = Chapter(project_id=project_id, chapter_number=chapter_number)
+
+        # 查找对应的大纲以获取volume_id
+        outline_stmt = (
+            select(ChapterOutline)
+            .where(
+                ChapterOutline.project_id == project_id,
+                ChapterOutline.chapter_number == chapter_number,
+            )
+        )
+        outline_result = await self.session.execute(outline_stmt)
+        outline = outline_result.scalars().first()
+
+        volume_id = outline.volume_id if outline else None
+
+        # 如果没有volume_id,获取或创建默认分卷
+        if not volume_id:
+            volume_stmt = (
+                select(Volume)
+                .where(Volume.project_id == project_id, Volume.volume_number == 1)
+            )
+            volume_result = await self.session.execute(volume_stmt)
+            default_volume = volume_result.scalars().first()
+
+            if not default_volume:
+                default_volume = Volume(
+                    project_id=project_id,
+                    volume_number=1,
+                    title="默认",
+                    description="第一卷"
+                )
+                self.session.add(default_volume)
+                await self.session.flush()
+
+            volume_id = default_volume.id
+
+        chapter = Chapter(
+            project_id=project_id,
+            chapter_number=chapter_number,
+            volume_id=volume_id
+        )
         self.session.add(chapter)
         await self.session.commit()
         await self.session.refresh(chapter)
@@ -561,11 +636,22 @@ class NovelService:
                     }
                     for relation in sorted(project.relationships_, key=lambda r: r.position)
                 ],
+                volumes=[
+                    VolumeSchema(
+                        id=volume.id,
+                        volume_number=volume.volume_number,
+                        title=volume.title,
+                        description=volume.description,
+                    )
+                    for volume in sorted(project.volumes, key=lambda v: v.volume_number)
+                ],
                 chapter_outline=[
                     ChapterOutlineSchema(
                         chapter_number=outline.chapter_number,
                         title=outline.title,
                         summary=outline.summary or "",
+                        volume_id=outline.volume_id,
+                        volume_number=outline.volume.volume_number if outline.volume else None,
                     )
                     for outline in sorted(project.outlines, key=lambda o: o.chapter_number)
                 ],
@@ -581,6 +667,7 @@ class NovelService:
             world_setting={},
             characters=[],
             relationships=[],
+            volumes=[],
             chapter_outline=[],
         )
 

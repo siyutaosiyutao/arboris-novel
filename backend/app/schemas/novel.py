@@ -47,10 +47,26 @@ class ChapterGenerationStatus(str, Enum):
     SUCCESSFUL = "successful"
 
 
+class BugFixMode(str, Enum):
+    """Bug修复模式枚举"""
+    ORIGINAL = "original"  # 原始模式(有Bug)
+    FIXED = "fixed"        # 修复模式(已修复Bug #1, #3, #4, #7)
+
+
+class Volume(BaseModel):
+    """分卷信息"""
+    id: Optional[int] = None
+    volume_number: int
+    title: str
+    description: Optional[str] = None
+
+
 class ChapterOutline(BaseModel):
     chapter_number: int
     title: str
     summary: str
+    volume_id: Optional[int] = None
+    volume_number: Optional[int] = None  # 用于前端显示
 
 
 class Chapter(ChapterOutline):
@@ -78,6 +94,7 @@ class Blueprint(BaseModel):
     world_setting: Dict[str, Any] = {}
     characters: List[Dict[str, Any]] = []
     relationships: List[Relationship] = []
+    volumes: List[Volume] = []  # 分卷列表
     chapter_outline: List[ChapterOutline] = []
 
 

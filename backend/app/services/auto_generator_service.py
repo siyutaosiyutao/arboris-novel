@@ -10,18 +10,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..models.auto_generator import AutoGeneratorLog, AutoGeneratorTask
-from ..models.novel import Chapter, ChapterOutline, BlueprintCharacter, NovelProject as Project, NovelBlueprint
-from ..schemas.novel import GenerateChapterRequest
+from ..models.novel import Chapter, ChapterOutline, BlueprintCharacter, NovelProject as Project, NovelBlueprint, Volume
+from ..schemas.novel import GenerateChapterRequest, BugFixMode
 from .novel_service import NovelService
 
 logger = logging.getLogger(__name__)
 
 
 class AutoGeneratorService:
-    """自动生成器服务"""
+    """
+    自动生成器服务
+
+    支持双模式切换:
+    - ORIGINAL: 原始模式(保留原有Bug)
+    - FIXED: 修复模式(已修复Bug #1, #3, #4, #7)
+
+    通过 generation_config["bug_fix_mode"] 控制
+    """
 
     # 存储运行中的任务
     _running_tasks: dict[int, asyncio.Task] = {}
+
+    @classmethod
+    def _get_bug_fix_mode(cls, task: AutoGeneratorTask) -> BugFixMode:
+        """获取Bug修复模式"""
+        if not task.generation_config:
+            return BugFixMode.FIXED  # 默认使用修复模式
+
+        mode = task.generation_config.get("bug_fix_mode", "fixed")
+        return BugFixMode.FIXED if mode == "fixed" else BugFixMode.ORIGINAL
 
     @classmethod
     async def create_task(
@@ -560,7 +577,15 @@ class AutoGeneratorService:
                     )
 
                     # ✅ 双模式架构：根据配置选择生成模式
-                    generation_mode = task.generation_config.get("generation_mode", "basic")
+                    # Bug #4 修复: 处理 generation_config 可能为 None 的情况
+                    bug_fix_mode = cls._get_bug_fix_mode(task)
+
+                    if bug_fix_mode == BugFixMode.FIXED:
+                        # 修复模式: 安全地获取配置
+                        generation_mode = (task.generation_config or {}).get("generation_mode", "basic")
+                    else:
+                        # 原始模式: 保留原有Bug(可能抛出AttributeError)
+                        generation_mode = task.generation_config.get("generation_mode", "basic")
 
                     if generation_mode == "enhanced":
                         # 增强模式：使用超级分析
@@ -927,6 +952,26 @@ class AutoGeneratorService:
             )
             raise ValueError(f"自动生成大纲失败，AI 返回的内容格式不正确: {str(exc)}") from exc
 
+        # 获取或创建默认分卷
+        result = await db.execute(
+            select(Volume)
+            .where(Volume.project_id == task.project_id)
+            .order_by(Volume.volume_number.desc())
+            .limit(1)
+        )
+        last_volume = result.scalar_one_or_none()
+
+        if not last_volume:
+            # 创建默认分卷
+            last_volume = Volume(
+                project_id=task.project_id,
+                volume_number=1,
+                title="默认",
+                description="第一卷"
+            )
+            db.add(last_volume)
+            await db.flush()
+
         # 保存大纲到数据库
         new_outlines = data.get("chapters", [])
         if not new_outlines:
@@ -946,11 +991,15 @@ class AutoGeneratorService:
                 # 更新现有大纲
                 record.title = item.get("title", record.title)
                 record.summary = item.get("summary", record.summary)
+                # 如果没有分卷,分配到最后一个分卷
+                if not record.volume_id:
+                    record.volume_id = last_volume.id
             else:
-                # 创建新大纲
+                # 创建新大纲,分配到最后一个分卷
                 db.add(
                     ChapterOutline(
                         project_id=task.project_id,
+                        volume_id=last_volume.id,
                         chapter_number=item.get("chapter_number"),
                         title=item.get("title", ""),
                         summary=item.get("summary"),
@@ -1054,8 +1103,8 @@ class AutoGeneratorService:
                 else:
                     logger.warning(f"第 {chapter_number} 章增强分析失败，仅保存摘要")
 
-                # 提交嵌套事务
-                await db.commit()
+                # Bug #1 修复: 嵌套事务中不需要手动commit，退出with块时自动提交
+                # await db.commit()  # ❌ 移除
 
             logger.info(f"增强模式：第 {chapter_number} 章处理完成")
 
@@ -1155,7 +1204,8 @@ class AutoGeneratorService:
                 # 更新成长等级（存储在 extra 字段中）
                 growth_level = change.get("growth_level")
                 if growth_level:
-                    if not character.extra:
+                    # Bug #7 修复: 确保 extra 是 dict 类型
+                    if not isinstance(character.extra, dict):
                         character.extra = {}
                     character.extra["growth_level"] = growth_level
 
@@ -1163,7 +1213,8 @@ class AutoGeneratorService:
             else:
                 logger.warning(f"未找到角色：{char_name}，跳过更新")
 
-        await db.commit()
+        # Bug #1 修复: 移除子方法中的 commit，由外层事务统一管理
+        # await db.commit()  # ❌ 移除
 
     @classmethod
     def _find_character_by_name(
@@ -1205,9 +1256,20 @@ class AutoGeneratorService:
         new_characters: list,
         blueprint: dict
     ):
-        """添加新角色（只添加主要角色和配角）"""
+        """
+        添加新角色（只添加主要角色和配角）
+        Bug #3 修复: 添加重复角色检查
+        """
         if not new_characters:
             return
+
+        # Bug #3 修复: 获取现有角色列表
+        existing_chars_stmt = select(BlueprintCharacter).where(
+            BlueprintCharacter.project_id == project_id
+        )
+        existing_chars_result = await db.execute(existing_chars_stmt)
+        existing_chars = existing_chars_result.scalars().all()
+        existing_names = {char.name for char in existing_chars}
 
         # 获取当前最大 position
         stmt = select(func.max(BlueprintCharacter.position)).where(
@@ -1219,7 +1281,13 @@ class AutoGeneratorService:
         # 过滤并添加新角色
         added_count = 0
         for char in new_characters:
+            char_name = char.get("name", "未命名角色")
             importance = char.get("importance", "minor")
+
+            # Bug #3 修复: 检查角色是否已存在
+            if char_name in existing_names:
+                logger.info(f"角色 '{char_name}' 已存在，跳过添加")
+                continue
 
             # 只添加主要角色和配角
             if importance in ["main", "supporting"]:
@@ -1227,7 +1295,7 @@ class AutoGeneratorService:
 
                 new_char = BlueprintCharacter(
                     project_id=project_id,
-                    name=char.get("name", "未命名角色"),
+                    name=char_name,
                     identity=char.get("description", ""),  # 使用 identity 字段
                     personality=char.get("personality", ""),
                     goals=char.get("goals", ""),
@@ -1237,11 +1305,13 @@ class AutoGeneratorService:
                 )
                 db.add(new_char)
                 added_count += 1
+                existing_names.add(char_name)  # 添加到已存在列表，避免本次批量添加中的重复
 
                 logger.info(f"添加新角色：{new_char.name} ({importance})")
 
         if added_count > 0:
-            await db.commit()
+            # Bug #1 修复: 移除子方法中的 commit，由外层事务统一管理
+            # await db.commit()  # ❌ 移除
             logger.info(f"共添加 {added_count} 个新角色")
 
     @classmethod
@@ -1289,7 +1359,8 @@ class AutoGeneratorService:
 
         if updated:
             novel_blueprint.world_setting = world_setting
-            await db.commit()
+            # Bug #1 修复: 移除子方法中的 commit，由外层事务统一管理
+            # await db.commit()  # ❌ 移除
             logger.info(f"世界观已扩展：{list(world_extensions.keys())}")
 
     @classmethod
