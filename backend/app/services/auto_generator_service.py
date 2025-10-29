@@ -975,7 +975,7 @@ class AutoGeneratorService:
         db: AsyncSession,
         task: AutoGeneratorTask,
         chapter: Chapter,
-        llm_service: LLMService
+        llm_service: "LLMService"
     ):
         """基础模式：只生成摘要"""
         try:
@@ -1012,7 +1012,7 @@ class AutoGeneratorService:
         chapter: Chapter,
         chapter_number: int,
         blueprint: dict,
-        llm_service: LLMService
+        llm_service: "LLMService"
     ):
         """
         ✅ 增强模式：超级分析 + 自动管理（带事务回滚）
