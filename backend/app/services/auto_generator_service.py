@@ -39,7 +39,7 @@ class AutoGeneratorService:
 
         # 检查项目是否存在
         result = await db.execute(
-            select(NovelProject).where(NovelProject.id == project_id)
+            select(Project).where(Project.id == project_id)
         )
         project = result.scalar_one_or_none()
         if not project:
@@ -385,17 +385,17 @@ class AutoGeneratorService:
             from sqlalchemy.orm import selectinload, joinedload
 
             result = await db.execute(
-                select(NovelProject)
-                .where(NovelProject.id == task.project_id)
+                select(Project)
+                .where(Project.id == task.project_id)
                 .options(
-                    selectinload(NovelProject.chapters).selectinload(Chapter.versions),
-                    selectinload(NovelProject.chapters).selectinload(Chapter.selected_version),
-                    selectinload(NovelProject.chapters).selectinload(Chapter.evaluations),
-                    selectinload(NovelProject.outlines),
-                    selectinload(NovelProject.conversations),
-                    joinedload(NovelProject.blueprint),  # 使用 joinedload 确保 blueprint 被加载
-                    selectinload(NovelProject.characters),
-                    selectinload(NovelProject.relationships_)
+                    selectinload(Project.chapters).selectinload(Chapter.versions),
+                    selectinload(Project.chapters).selectinload(Chapter.selected_version),
+                    selectinload(Project.chapters).selectinload(Chapter.evaluations),
+                    selectinload(Project.outlines),
+                    selectinload(Project.conversations),
+                    joinedload(Project.blueprint),  # 使用 joinedload 确保 blueprint 被加载
+                    selectinload(Project.characters),
+                    selectinload(Project.relationships_)
                 )
             )
             project = result.scalar_one_or_none()
