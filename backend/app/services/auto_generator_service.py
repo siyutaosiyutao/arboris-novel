@@ -852,7 +852,7 @@ class AutoGeneratorService:
         """
         from .prompt_service import PromptService
         from .llm_service import LLMService
-        from ..utils.text_utils import remove_think_tags, unwrap_markdown_json
+        from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
 
         await cls._log(
             db,
