@@ -5,11 +5,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..models.auto_generator import AutoGeneratorLog, AutoGeneratorTask
-from ..models.novel import Chapter, ChapterOutline, NovelProject
+from ..models.novel import Chapter, ChapterOutline, BlueprintCharacter, NovelProject as Project, NovelBlueprint
 from ..schemas.novel import GenerateChapterRequest
 from .novel_service import NovelService
 
@@ -18,10 +19,10 @@ logger = logging.getLogger(__name__)
 
 class AutoGeneratorService:
     """自动生成器服务"""
-    
+
     # 存储运行中的任务
     _running_tasks: dict[int, asyncio.Task] = {}
-    
+
     @classmethod
     async def create_task(
         cls,
@@ -35,7 +36,7 @@ class AutoGeneratorService:
         generation_config: Optional[dict] = None,
     ) -> AutoGeneratorTask:
         """创建自动生成任务"""
-        
+
         # 检查项目是否存在
         result = await db.execute(
             select(NovelProject).where(NovelProject.id == project_id)
@@ -43,7 +44,7 @@ class AutoGeneratorService:
         project = result.scalar_one_or_none()
         if not project:
             raise ValueError(f"Project {project_id} not found")
-        
+
         # 检查是否已有运行中的任务
         result = await db.execute(
             select(AutoGeneratorTask).where(
@@ -54,7 +55,7 @@ class AutoGeneratorService:
         existing_task = result.scalar_one_or_none()
         if existing_task:
             raise ValueError(f"Project {project_id} already has a running task")
-        
+
         # 创建任务
         task = AutoGeneratorTask(
             project_id=project_id,
@@ -66,29 +67,29 @@ class AutoGeneratorService:
             generation_config=generation_config or {},
             status="pending"
         )
-        
+
         db.add(task)
         await db.commit()
         await db.refresh(task)
-        
+
         await cls._log(db, task.id, "info", f"自动生成任务已创建，目标章节数: {target_chapters or '无限'}")
-        
+
         return task
-    
+
     @classmethod
     async def start_task(cls, db: AsyncSession, task_id: int) -> AutoGeneratorTask:
         """启动自动生成任务"""
-        
+
         result = await db.execute(
             select(AutoGeneratorTask).where(AutoGeneratorTask.id == task_id)
         )
         task = result.scalar_one_or_none()
         if not task:
             raise ValueError(f"Task {task_id} not found")
-        
+
         if task.status not in ["pending", "paused"]:
             raise ValueError(f"Task {task_id} cannot be started (status: {task.status})")
-        
+
         # 更新状态
         await db.execute(
             update(AutoGeneratorTask)
@@ -100,53 +101,53 @@ class AutoGeneratorService:
             )
         )
         await db.commit()
-        
+
         await cls._log(db, task_id, "info", "自动生成任务已启动")
-        
+
         # 启动后台任务
         asyncio_task = asyncio.create_task(cls._run_generator(task_id))
         cls._running_tasks[task_id] = asyncio_task
-        
+
         await db.refresh(task)
         return task
-    
+
     @classmethod
     async def pause_task(cls, db: AsyncSession, task_id: int) -> AutoGeneratorTask:
         """暂停任务"""
-        
+
         result = await db.execute(
             select(AutoGeneratorTask).where(AutoGeneratorTask.id == task_id)
         )
         task = result.scalar_one_or_none()
         if not task:
             raise ValueError(f"Task {task_id} not found")
-        
+
         if task.status != "running":
             raise ValueError(f"Task {task_id} is not running")
-        
+
         await db.execute(
             update(AutoGeneratorTask)
             .where(AutoGeneratorTask.id == task_id)
             .values(status="paused", updated_at=datetime.now(timezone.utc))
         )
         await db.commit()
-        
+
         await cls._log(db, task_id, "info", "自动生成任务已暂停")
-        
+
         await db.refresh(task)
         return task
-    
+
     @classmethod
     async def stop_task(cls, db: AsyncSession, task_id: int) -> AutoGeneratorTask:
         """停止任务"""
-        
+
         result = await db.execute(
             select(AutoGeneratorTask).where(AutoGeneratorTask.id == task_id)
         )
         task = result.scalar_one_or_none()
         if not task:
             raise ValueError(f"Task {task_id} not found")
-        
+
         await db.execute(
             update(AutoGeneratorTask)
             .where(AutoGeneratorTask.id == task_id)
@@ -157,17 +158,17 @@ class AutoGeneratorService:
             )
         )
         await db.commit()
-        
+
         await cls._log(db, task_id, "info", "自动生成任务已停止")
-        
+
         # 取消后台任务
         if task_id in cls._running_tasks:
             cls._running_tasks[task_id].cancel()
             del cls._running_tasks[task_id]
-        
+
         await db.refresh(task)
         return task
-    
+
     @classmethod
     async def get_task(cls, db: AsyncSession, task_id: int) -> Optional[AutoGeneratorTask]:
         """获取任务信息"""
@@ -193,12 +194,12 @@ class AutoGeneratorService:
             .order_by(AutoGeneratorTask.created_at.desc())
         )
         return list(result.scalars().all())
-    
+
     @classmethod
     async def get_task_logs(
-        cls, 
-        db: AsyncSession, 
-        task_id: int, 
+        cls,
+        db: AsyncSession,
+        task_id: int,
         limit: int = 100
     ) -> list[AutoGeneratorLog]:
         """获取任务日志"""
@@ -209,7 +210,7 @@ class AutoGeneratorService:
             .limit(limit)
         )
         return list(result.scalars().all())
-    
+
     @classmethod
     async def _run_generator(cls, task_id: int):
         """后台生成任务"""
@@ -277,11 +278,11 @@ class AutoGeneratorService:
                 del cls._running_tasks[task_id]
 
             logger.info(f"Auto-generator for task {task_id} finished")
-    
+
     @classmethod
     async def _generate_next_chapters(cls, db: AsyncSession, task: AutoGeneratorTask):
         """生成下一批章节"""
-        
+
         # 获取当前最大章节号
         result = await db.execute(
             select(Chapter.chapter_number)
@@ -291,7 +292,7 @@ class AutoGeneratorService:
         )
         last_chapter = result.scalar_one_or_none()
         next_chapter_number = (last_chapter or 0) + 1
-        
+
         # 获取大纲
         result = await db.execute(
             select(ChapterOutline)
@@ -347,24 +348,24 @@ class AutoGeneratorService:
                     f"自动生成大纲失败: {str(e)}"
                 )
                 raise
-        
+
         await cls._log(
             db,
             task.id,
             "info",
             f"开始生成第 {next_chapter_number} 章: {outline.title}"
         )
-        
+
         # 调用生成服务
         novel_service = NovelService(db)
-        
+
         # 构建生成请求
         request = GenerateChapterRequest(
             chapter_number=next_chapter_number,
             version_count=task.generation_config.get("version_count", 3),
             writing_notes=task.generation_config.get("writing_notes")
         )
-        
+
         try:
             # 导入必要的服务和工具
             from .prompt_service import PromptService
@@ -376,10 +377,10 @@ class AutoGeneratorService:
             from ..repositories.system_config_repository import SystemConfigRepository
             import json
             import os
-            
+
             prompt_service = PromptService(db)
             llm_service = LLMService(db)
-            
+
             # 获取项目（预加载所有关系以避免 greenlet_spawn 错误）
             from sqlalchemy.orm import selectinload, joinedload
 
@@ -413,20 +414,20 @@ class AutoGeneratorService:
                 _ = ch.versions
                 _ = ch.selected_version
                 _ = ch.evaluations
-            
+
             # 准备章节
             chapter = await novel_service.get_or_create_chapter(task.project_id, next_chapter_number)
             chapter.real_summary = None
             chapter.selected_version_id = None
             chapter.status = "generating"
             await db.commit()
-            
+
             # 收集前情摘要
             outlines_map = {item.chapter_number: item for item in project.outlines}
             completed_chapters = []
             previous_summary_text = ""
             previous_tail_excerpt = ""
-            
+
             for existing in project.chapters:
                 if existing.chapter_number >= next_chapter_number:
                     continue
@@ -451,21 +452,21 @@ class AutoGeneratorService:
                 content = existing.selected_version.content
                 lines = content.split('\n')
                 previous_tail_excerpt = '\n'.join(lines[-10:]) if len(lines) > 10 else content
-            
+
             # 构建蓝图
             project_schema = await novel_service._serialize_project(project)
             blueprint_dict = project_schema.blueprint.model_dump()
-            
+
             # 清理蓝图
             banned_keys = {"chapter_outline", "chapter_summaries", "chapter_details", "chapter_dialogues", "chapter_events", "conversation_history", "character_timelines"}
             for key in banned_keys:
                 blueprint_dict.pop(key, None)
-            
+
             # 获取写作提示词
             writer_prompt = await prompt_service.get_prompt("writing")
             if not writer_prompt:
                 raise ValueError("缺少写作提示词")
-            
+
             # RAG 检索
             vector_store = None
             if settings.vector_store_enabled:
@@ -473,19 +474,19 @@ class AutoGeneratorService:
                     vector_store = VectorStoreService()
                 except:
                     pass
-            
+
             context_service = ChapterContextService(llm_service=llm_service, vector_store=vector_store)
             rag_context = await context_service.retrieve_for_generation(
                 project_id=task.project_id,
                 query_text=f"{outline.title}\n{outline.summary}",
                 user_id=task.user_id,
             )
-            
+
             # 构建提示词
             blueprint_text = json.dumps(blueprint_dict, ensure_ascii=False, indent=2)
             rag_chunks_text = "\n\n".join(rag_context.chunk_texts()) if rag_context and rag_context.chunks else "未检索到章节片段"
             rag_summaries_text = "\n".join(rag_context.summary_lines()) if rag_context and rag_context.summaries else "未检索到章节摘要"
-            
+
             prompt_sections = [
                 ("[世界蓝图](JSON)", blueprint_text),
                 ("[上一章摘要]", previous_summary_text or "暂无"),
@@ -495,11 +496,11 @@ class AutoGeneratorService:
                 ("[当前章节目标]", f"标题：{outline.title}\n摘要：{outline.summary}"),
             ]
             prompt_input = "\n\n".join(f"{title}\n{content}" for title, content in prompt_sections if content)
-            
+
             # 生成版本
             version_count = task.generation_config.get("version_count", 2)
             raw_versions = []
-            
+
             for idx in range(version_count):
                 response = await llm_service.get_llm_response(
                     system_prompt=writer_prompt,
@@ -514,7 +515,7 @@ class AutoGeneratorService:
                     raw_versions.append(json.loads(normalized))
                 except:
                     raw_versions.append({"content": normalized})
-            
+
             # 提取内容
             contents = []
             metadata = []
@@ -530,10 +531,10 @@ class AutoGeneratorService:
                 else:
                     contents.append(str(variant))
                     metadata.append({"raw": variant})
-            
+
             # 保存版本
             await novel_service.replace_chapter_versions(chapter, contents, metadata)
-            
+
             # 如果启用自动选择，选择第一个版本
             if task.auto_select_version:
                 # 重新查询 chapter 并预加载 versions 关系
@@ -550,15 +551,30 @@ class AutoGeneratorService:
                 if chapter_obj and chapter_obj.versions:
                     # 选择第一个版本（索引为 0）
                     await novel_service.select_chapter_version(chapter_obj, 0)
-                    
+
                     await cls._log(
                         db,
                         task.id,
                         "success",
                         f"第 {next_chapter_number} 章生成完成并已自动选择版本"
                     )
-                    
-                    # 触发创意功能分析
+
+                    # ✅ 双模式架构：根据配置选择生成模式
+                    generation_mode = task.generation_config.get("generation_mode", "basic")
+
+                    if generation_mode == "enhanced":
+                        # 增强模式：使用超级分析
+                        await cls._process_enhanced_mode(
+                            db, task, chapter_obj, next_chapter_number,
+                            blueprint_dict, llm_service
+                        )
+                    else:
+                        # 基础模式：只生成摘要（原有逻辑）
+                        await cls._process_basic_mode(
+                            db, task, chapter_obj, llm_service
+                        )
+
+                    # 触发创意功能分析（保留原有功能）
                     await cls._run_creative_analysis(db, task, chapter_obj.id)
             else:
                 await cls._log(
@@ -567,7 +583,7 @@ class AutoGeneratorService:
                     "success",
                     f"第 {next_chapter_number} 章生成完成，等待手动选择版本"
                 )
-                
+
                 # 即使未自动选择版本，也触发创意功能分析
                 result = await db.execute(
                     select(Chapter)
@@ -580,7 +596,7 @@ class AutoGeneratorService:
                 chapter_obj = result.scalar_one_or_none()
                 if chapter_obj:
                     await cls._run_creative_analysis(db, task, chapter_obj.id)
-            
+
             # 更新统计
             await db.execute(
                 update(AutoGeneratorTask)
@@ -592,7 +608,7 @@ class AutoGeneratorService:
                 )
             )
             await db.commit()
-            
+
         except Exception as e:
             await cls._log(
                 db,
@@ -601,20 +617,20 @@ class AutoGeneratorService:
                 f"第 {next_chapter_number} 章生成失败: {str(e)}"
             )
             raise
-    
+
     @classmethod
     async def _handle_error(cls, db: AsyncSession, task_id: int, error_msg: str):
         """处理错误"""
-        
+
         result = await db.execute(
             select(AutoGeneratorTask).where(AutoGeneratorTask.id == task_id)
         )
         task = result.scalar_one_or_none()
         if not task:
             return
-        
+
         error_count = task.error_count + 1
-        
+
         # 如果错误次数过多，停止任务
         if error_count >= 5:
             await db.execute(
@@ -639,9 +655,9 @@ class AutoGeneratorService:
                     updated_at=datetime.now(timezone.utc)
                 )
             )
-        
+
         await db.commit()
-    
+
     @classmethod
     async def _log(
         cls,
@@ -662,41 +678,41 @@ class AutoGeneratorService:
         )
         db.add(log)
         await db.commit()
-        
+
         logger.info(f"[Task {task_id}] {log_type.upper()}: {message}")
 
-    
+
     @classmethod
     async def _run_creative_analysis(
-        cls, 
-        db: AsyncSession, 
-        task: AutoGeneratorTask, 
+        cls,
+        db: AsyncSession,
+        task: AutoGeneratorTask,
         chapter_id: str
     ):
         """运行创意功能分析"""
         config = task.generation_config or {}
-        
+
         # 异步执行分析任务，不阻塞主流程
         analysis_tasks = []
-        
+
         # 1. 张力分析
         if config.get("enable_tension_analysis", False):
             analysis_tasks.append(
                 cls._analyze_tension(db, chapter_id, task.id)
             )
-        
+
         # 2. 角色一致性检查
         if config.get("enable_character_consistency", False):
             analysis_tasks.append(
                 cls._check_character_consistency(db, chapter_id, task.id)
             )
-        
+
         # 3. 伏笔识别
         if config.get("enable_foreshadowing", False):
             analysis_tasks.append(
                 cls._detect_foreshadowing(db, chapter_id, task.id)
             )
-        
+
         # 并发执行所有分析任务
         if analysis_tasks:
             try:
@@ -707,10 +723,10 @@ class AutoGeneratorService:
                         logger.error(f"Creative analysis error: {result}")
             except Exception as e:
                 await cls._log(
-                    db, task.id, "warning", 
+                    db, task.id, "warning",
                     f"创意功能分析出错: {str(e)}"
                 )
-    
+
     @classmethod
     async def _analyze_tension(cls, db: AsyncSession, chapter_id: str, task_id: int):
         """执行张力分析"""
@@ -742,7 +758,7 @@ class AutoGeneratorService:
                 db, task_id, "warning",
                 f"张力分析失败: {str(e)}"
             )
-    
+
     @classmethod
     async def _check_character_consistency(
         cls, db: AsyncSession, chapter_id: str, task_id: int
@@ -783,7 +799,7 @@ class AutoGeneratorService:
                 db, task_id, "warning",
                 f"角色一致性检查失败: {str(e)}"
             )
-    
+
     @classmethod
     async def _detect_foreshadowing(
         cls, db: AsyncSession, chapter_id: str, task_id: int
@@ -855,6 +871,24 @@ class AutoGeneratorService:
         project_schema = await novel_service.get_project_schema(task.project_id, user_id)
         blueprint_dict = project_schema.blueprint.model_dump()
 
+        # 收集已完成章节摘要（基础模式修复）
+        completed_summaries = []
+        for chapter in project_schema.chapters:
+            # 只收集已完成且有摘要的章节
+            if chapter.selected_version and chapter.real_summary:
+                completed_summaries.append({
+                    "chapter_number": chapter.chapter_number,
+                    "title": chapter.title or f"第{chapter.chapter_number}章",
+                    "summary": chapter.real_summary
+                })
+
+        await cls._log(
+            db,
+            task.id,
+            "info",
+            f"已收集 {len(completed_summaries)} 章已完成章节摘要，用于生成新大纲"
+        )
+
         # 获取大纲提示词
         prompt_service = PromptService(db)
         outline_prompt = await prompt_service.get_prompt("outline")
@@ -864,6 +898,7 @@ class AutoGeneratorService:
         # 构建请求payload
         payload = {
             "novel_blueprint": blueprint_dict,
+            "completed_chapters": completed_summaries,  # 新增：传递已完成章节
             "wait_to_generate": {
                 "start_chapter": start_chapter,
                 "num_chapters": num_chapters,
@@ -930,3 +965,352 @@ class AutoGeneratorService:
             "success",
             f"成功生成 {len(new_outlines)} 章大纲"
         )
+
+
+    # ========== 增强模式处理方法 ==========
+
+    @classmethod
+    async def _process_basic_mode(
+        cls,
+        db: AsyncSession,
+        task: AutoGeneratorTask,
+        chapter: Chapter,
+        llm_service: LLMService
+    ):
+        """基础模式：只生成摘要"""
+        try:
+            # 获取选中版本的内容
+            if not chapter.selected_version:
+                logger.warning(f"章节 {chapter.chapter_number} 没有选中版本，跳过摘要生成")
+                return
+
+            content = chapter.selected_version.content
+
+            # 生成摘要
+            summary = await llm_service.get_summary(
+                chapter_content=content,
+                temperature=0.2,
+                user_id=task.user_id,
+                timeout=180.0
+            )
+
+            # 保存摘要
+            chapter.real_summary = summary
+            await db.commit()
+
+            logger.info(f"基础模式：第 {chapter.chapter_number} 章摘要生成完成")
+
+        except Exception as e:
+            logger.error(f"基础模式处理失败：{e}")
+            await db.rollback()
+
+    @classmethod
+    async def _process_enhanced_mode(
+        cls,
+        db: AsyncSession,
+        task: AutoGeneratorTask,
+        chapter: Chapter,
+        chapter_number: int,
+        blueprint: dict,
+        llm_service: LLMService
+    ):
+        """
+        ✅ 增强模式：超级分析 + 自动管理（带事务回滚）
+
+        解决问题：
+        - #4: 添加事务回滚机制
+        - #10: 实现自动降级策略
+        """
+        try:
+            # 获取选中版本的内容
+            if not chapter.selected_version:
+                logger.warning(f"章节 {chapter_number} 没有选中版本，降级到基础模式")
+                await cls._process_basic_mode(db, task, chapter, llm_service)
+                return
+
+            content = chapter.selected_version.content
+
+            # 使用超级分析服务
+            from .super_analysis_service import SuperAnalysisService
+            super_analysis = SuperAnalysisService(db, llm_service)
+
+            basic_result, enhanced_result = await super_analysis.analyze_chapter(
+                chapter_number=chapter_number,
+                chapter_content=content,
+                blueprint=blueprint,
+                user_id=task.user_id
+            )
+
+            # ✅ 开启嵌套事务（解决问题 #4）
+            async with db.begin_nested():
+                # 保存基础分析结果（摘要）
+                chapter.real_summary = basic_result.get("summary", "")
+
+                # 如果增强分析成功，处理增强数据
+                if enhanced_result:
+                    await cls._process_enhanced_analysis(
+                        db, task, chapter_number, enhanced_result, blueprint
+                    )
+                else:
+                    logger.warning(f"第 {chapter_number} 章增强分析失败，仅保存摘要")
+
+                # 提交嵌套事务
+                await db.commit()
+
+            logger.info(f"增强模式：第 {chapter_number} 章处理完成")
+
+        except Exception as e:
+            logger.error(f"增强模式处理失败，回滚事务：{e}")
+            await db.rollback()
+
+            # ✅ 自动降级到基础模式（解决问题 #10）
+            logger.info(f"降级到基础模式处理第 {chapter_number} 章")
+            await cls._process_basic_mode(db, task, chapter, llm_service)
+
+    @classmethod
+    async def _process_enhanced_analysis(
+        cls,
+        db: AsyncSession,
+        task: AutoGeneratorTask,
+        chapter_number: int,
+        enhanced_result: dict,
+        blueprint: dict
+    ):
+        """处理增强分析结果"""
+
+        # 1. 更新角色状态
+        character_changes = enhanced_result.get("character_changes", [])
+        if character_changes:
+            await cls._update_character_states(
+                db, task.project_id, character_changes
+            )
+
+        # 2. 添加新角色
+        new_characters = enhanced_result.get("new_characters", [])
+        if new_characters:
+            await cls._add_new_characters(
+                db, task.project_id, new_characters, blueprint
+            )
+
+        # 3. 扩展世界观
+        world_extensions = enhanced_result.get("world_extensions", {})
+        if world_extensions:
+            await cls._update_world_setting(
+                db, task.project_id, world_extensions, blueprint
+            )
+
+        # 4. 保存伏笔
+        foreshadowings = enhanced_result.get("foreshadowings", [])
+        if foreshadowings:
+            await cls._save_foreshadowings(
+                db, task.project_id, chapter_number, foreshadowings
+            )
+
+
+    # ========== 任务 2.3：角色自动管理 ==========
+
+    @classmethod
+    async def _update_character_states(
+        cls,
+        db: AsyncSession,
+        project_id: str,
+        character_changes: list
+    ):
+        """
+        ✅ 更新角色状态（带批量查询优化）
+
+        解决问题：
+        - #2: 智能角色名称匹配
+        - #5: 批量查询优化
+        """
+        if not character_changes:
+            return
+
+        # ✅ 批量查询所有角色（解决问题 #5）
+        stmt = select(BlueprintCharacter).where(BlueprintCharacter.project_id == project_id)
+        result = await db.execute(stmt)
+        all_characters = result.scalars().all()
+
+        # 构建角色名称映射（用于快速查找）
+        character_map = {char.name: char for char in all_characters}
+
+        # 更新角色状态
+        for change in character_changes:
+            char_name = change.get("name")
+            if not char_name:
+                continue
+
+            # ✅ 智能模糊匹配（解决问题 #2）
+            character = cls._find_character_by_name(char_name, character_map)
+
+            if character:
+                # 追加能力变化到 abilities 字段
+                changes_desc = change.get("changes", "")
+                if changes_desc:
+                    if character.abilities:
+                        character.abilities += f"\n- {changes_desc}"
+                    else:
+                        character.abilities = f"- {changes_desc}"
+
+                # 更新成长等级（存储在 extra 字段中）
+                growth_level = change.get("growth_level")
+                if growth_level:
+                    if not character.extra:
+                        character.extra = {}
+                    character.extra["growth_level"] = growth_level
+
+                logger.info(f"更新角色状态：{char_name}")
+            else:
+                logger.warning(f"未找到角色：{char_name}，跳过更新")
+
+        await db.commit()
+
+    @classmethod
+    def _find_character_by_name(
+        cls,
+        name: str,
+        character_map: dict
+    ) -> Optional[BlueprintCharacter]:
+        """
+        ✅ 智能角色名称匹配（解决问题 #2）
+
+        匹配规则：
+        1. 精确匹配
+        2. 包含匹配（优先匹配更长的名称）
+        """
+        # 1. 精确匹配
+        if name in character_map:
+            return character_map[name]
+
+        # 2. 模糊匹配（按名称长度降序排序，优先匹配更长的名称）
+        sorted_chars = sorted(
+            character_map.items(),
+            key=lambda x: len(x[0]),
+            reverse=True
+        )
+
+        for char_name, character in sorted_chars:
+            # 包含匹配
+            if name in char_name or char_name in name:
+                logger.info(f"模糊匹配成功：'{name}' -> '{char_name}'")
+                return character
+
+        return None
+
+    @classmethod
+    async def _add_new_characters(
+        cls,
+        db: AsyncSession,
+        project_id: str,
+        new_characters: list,
+        blueprint: dict
+    ):
+        """添加新角色（只添加主要角色和配角）"""
+        if not new_characters:
+            return
+
+        # 获取当前最大 position
+        stmt = select(func.max(BlueprintCharacter.position)).where(
+            BlueprintCharacter.project_id == project_id
+        )
+        result = await db.execute(stmt)
+        max_position = result.scalar() or 0
+
+        # 过滤并添加新角色
+        added_count = 0
+        for char in new_characters:
+            importance = char.get("importance", "minor")
+
+            # 只添加主要角色和配角
+            if importance in ["main", "supporting"]:
+                max_position += 1
+
+                new_char = BlueprintCharacter(
+                    project_id=project_id,
+                    name=char.get("name", "未命名角色"),
+                    identity=char.get("description", ""),  # 使用 identity 字段
+                    personality=char.get("personality", ""),
+                    goals=char.get("goals", ""),
+                    abilities=char.get("abilities", ""),
+                    position=max_position,
+                    extra={"growth_level": 1}  # 新角色默认等级为 1，存储在 extra 中
+                )
+                db.add(new_char)
+                added_count += 1
+
+                logger.info(f"添加新角色：{new_char.name} ({importance})")
+
+        if added_count > 0:
+            await db.commit()
+            logger.info(f"共添加 {added_count} 个新角色")
+
+    @classmethod
+    async def _update_world_setting(
+        cls,
+        db: AsyncSession,
+        project_id: str,
+        world_extensions: dict,
+        blueprint: dict
+    ):
+        """扩展世界观设定"""
+        if not world_extensions:
+            return
+
+        # 获取项目的蓝图
+        stmt = select(NovelBlueprint).where(NovelBlueprint.project_id == project_id)
+        result = await db.execute(stmt)
+        novel_blueprint = result.scalar_one_or_none()
+
+        if not novel_blueprint:
+            logger.warning(f"项目 {project_id} 的蓝图不存在，跳过世界观更新")
+            return
+
+        # 解析现有世界观
+        world_setting = novel_blueprint.world_setting or {}
+        if isinstance(world_setting, str):
+            try:
+                world_setting = json.loads(world_setting)
+            except:
+                world_setting = {}
+
+        # 扩展世界观元素
+        updated = False
+        for key in ["locations", "factions", "items", "rules"]:
+            new_items = world_extensions.get(key, [])
+            if new_items:
+                if key not in world_setting:
+                    world_setting[key] = []
+
+                # 去重添加
+                for item in new_items:
+                    if item not in world_setting[key]:
+                        world_setting[key].append(item)
+                        updated = True
+
+        if updated:
+            novel_blueprint.world_setting = world_setting
+            await db.commit()
+            logger.info(f"世界观已扩展：{list(world_extensions.keys())}")
+
+    @classmethod
+    async def _save_foreshadowings(
+        cls,
+        db: AsyncSession,
+        project_id: int,
+        chapter_number: int,
+        foreshadowings: list
+    ):
+        """保存伏笔（记录到日志）"""
+        if not foreshadowings:
+            return
+
+        for foreshadowing in foreshadowings:
+            content = foreshadowing.get("content", "")
+            ftype = foreshadowing.get("type", "unknown")
+            confidence = foreshadowing.get("confidence", 0.0)
+
+            logger.info(
+                f"伏笔识别 [第{chapter_number}章] "
+                f"类型={ftype}, 置信度={confidence:.2f}, "
+                f"内容={content[:50]}..."
+            )

@@ -271,6 +271,14 @@ async def generate_blueprint(
             detail=f"蓝图生成失败，AI 返回的内容格式不正确。请重试或联系管理员。错误详情: {str(exc)}"
         ) from exc
 
+    # 验证章节大纲数量（基础模式修复）
+    chapter_outline = blueprint_data.get("chapter_outline", [])
+    if len(chapter_outline) > 10:
+        logger.warning(
+            f"项目 {project_id} AI 生成了 {len(chapter_outline)} 章大纲，截取前 10 章"
+        )
+        blueprint_data["chapter_outline"] = chapter_outline[:10]
+
     blueprint = Blueprint(**blueprint_data)
     await novel_service.replace_blueprint(project_id, blueprint)
     if blueprint.title:

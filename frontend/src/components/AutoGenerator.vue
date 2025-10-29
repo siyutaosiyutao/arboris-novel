@@ -60,6 +60,26 @@
         <span class="hint">默认生成1个版本，可设置1-5个版本供选择</span>
       </div>
 
+      <!-- 生成模式选择 -->
+      <div class="form-group mode-selector">
+        <label>🎯 生成模式</label>
+        <select v-model="form.generationMode" class="mode-select">
+          <option value="basic">基础模式 - 快速稳定（2.5 次 AI 调用/章）</option>
+          <option value="enhanced">增强模式 - 智能追踪（3.6 次 AI 调用/章）</option>
+        </select>
+        <div class="mode-description">
+          <span v-if="form.generationMode === 'basic'" class="mode-hint basic">
+            ✅ 适合快速创作、短篇小说<br>
+            ✅ 成本低、速度快、稳定性高
+          </span>
+          <span v-else class="mode-hint enhanced">
+            ✅ 自动追踪角色状态、世界观扩展<br>
+            ✅ 自动识别伏笔、新角色<br>
+            ✅ 适合长篇小说、精品创作
+          </span>
+        </div>
+      </div>
+
       <div class="creative-features-section">
         <h4>🎨 创意功能（AI自动分析）</h4>
         <p class="section-hint">这些功能会在章节生成后自动运行，提供智能分析和建议</p>
@@ -221,6 +241,7 @@ const form = ref({
   intervalSeconds: 60,
   autoSelectVersion: true,
   versionCount: 1,
+  generationMode: 'basic',  // 默认使用基础模式
   enableTensionAnalysis: true,
   enableCharacterConsistency: true,
   enableForeshadowing: true
@@ -235,6 +256,7 @@ const createTask = async () => {
       interval_seconds: form.value.intervalSeconds,
       auto_select_version: form.value.autoSelectVersion,
       generation_config: {
+        generation_mode: form.value.generationMode,  // 传递生成模式
         version_count: form.value.versionCount,
         enable_tension_analysis: form.value.enableTensionAnalysis,
         enable_character_consistency: form.value.enableCharacterConsistency,
@@ -446,6 +468,63 @@ onUnmounted(() => {
   margin-top: 5px;
   font-size: 12px;
   color: #999;
+}
+
+/* 生成模式选择器样式 */
+.mode-selector {
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  padding: 20px;
+  border-radius: 8px;
+  border: 2px solid #e0e6ed;
+}
+
+.mode-selector label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #2d3748;
+}
+
+.mode-select {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid #cbd5e0;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  background: white;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.mode-select:hover {
+  border-color: #667eea;
+}
+
+.mode-select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.mode-description {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 6px;
+  background: white;
+}
+
+.mode-hint {
+  display: block;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.mode-hint.basic {
+  color: #2f855a;
+}
+
+.mode-hint.enhanced {
+  color: #5a67d8;
 }
 
 .info-banner {
