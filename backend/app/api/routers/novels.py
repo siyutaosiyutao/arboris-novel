@@ -338,6 +338,7 @@ async def patch_blueprint(
 async def upload_to_fanqie(
     project_id: str,
     account: str = Body("default", description="番茄小说账号标识"),
+    headless: bool = Body(True, description="是否使用无头模式（生产环境建议True）"),
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict:
@@ -350,6 +351,7 @@ async def upload_to_fanqie(
     Args:
         project_id: 小说项目ID
         account: 番茄小说账号标识（用于区分不同账号的cookie）
+        headless: 是否使用无头模式（默认True，生产环境建议使用）
 
     Returns:
         上传结果，包含成功/失败状态和详细信息
@@ -359,10 +361,10 @@ async def upload_to_fanqie(
     novel_service = NovelService(session)
     await novel_service.ensure_project_owner(project_id, current_user.id)
 
-    logger.info(f"用户 {current_user.id} 开始上传项目 {project_id} 到番茄小说")
+    logger.info(f"用户 {current_user.id} 开始上传项目 {project_id} 到番茄小说 (headless={headless})")
 
     # 使用异步上下文管理器
-    async with FanqiePublisherService() as publisher:
+    async with FanqiePublisherService(headless=headless) as publisher:
         result = await publisher.upload_novel_to_fanqie(
             db=session,
             project_id=project_id,

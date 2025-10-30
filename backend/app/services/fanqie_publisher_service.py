@@ -22,7 +22,7 @@ class FanqiePublisherService:
     基于实际测试的番茄小说平台流程
     """
 
-    def __init__(self, cookies_dir: str = "storage/fanqie_cookies"):
+    def __init__(self, cookies_dir: str = "storage/fanqie_cookies", headless: bool = False):
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
@@ -30,27 +30,47 @@ class FanqiePublisherService:
         self.book_id: Optional[str] = None
         self.cookies_dir = Path(cookies_dir)
         self.cookies_dir.mkdir(parents=True, exist_ok=True)
-        
+        self.headless = headless  # 保存headless设置
+
     async def __aenter__(self):
         """异步上下文管理器入口"""
         await self.init_browser()
         return self
-        
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """异步上下文管理器出口"""
         await self.close()
-        
-    async def init_browser(self, headless: bool = False):
+
+    async def init_browser(self, headless: Optional[bool] = None):
         """初始化浏览器
-        
+
         Args:
-            headless: 是否使用无头模式(默认False,方便调试)
+            headless: 是否使用无头模式(默认使用构造函数中的设置)
+                     生产环境建议设置为True
         """
+        if headless is None:
+            headless = self.headless
+
         self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(headless=headless)
+
+        # 配置浏览器启动参数
+        launch_options = {
+            "headless": headless,
+        }
+
+        # 如果是headless模式，添加一些额外的参数确保兼容性
+        if headless:
+            launch_options["args"] = [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+            ]
+
+        self.browser = await self.playwright.chromium.launch(**launch_options)
         self.context = await self.browser.new_context()
         self.page = await self.context.new_page()
-        logger.info("浏览器初始化完成")
+        logger.info(f"浏览器初始化完成 (headless={headless})")
         
     async def close(self):
         """关闭浏览器"""
@@ -176,6 +196,47 @@ class FanqiePublisherService:
             logger.error(f"查找书籍失败: {e}")
             return None
 
+    async def get_all_volumes(self) -> List[Dict[str, Any]]:
+        """获取当前书籍的所有分卷信息
+
+        Returns:
+            分卷列表，每个分卷包含 {index, name}
+        """
+        try:
+            # 先点击"编辑分卷"按钮，确保分卷列表可见
+            edit_btn = await self.page.query_selector('button:has-text("编辑分卷")')
+            if edit_btn:
+                await edit_btn.click()
+                await asyncio.sleep(1)
+
+            volumes = await self.page.evaluate('''() => {
+                const volumeItems = document.querySelectorAll('.chapter-volume-list-item-normal');
+                const result = [];
+                volumeItems.forEach((item, index) => {
+                    const nameSpan = item.querySelector('span');
+                    if (nameSpan) {
+                        result.push({
+                            index: index,
+                            name: nameSpan.textContent.trim()
+                        });
+                    }
+                });
+                return result;
+            }''')
+
+            # 关闭编辑分卷对话框
+            cancel_btn = await self.page.query_selector('button:has-text("取消")')
+            if cancel_btn:
+                await cancel_btn.click()
+                await asyncio.sleep(0.5)
+
+            logger.info(f"获取到 {len(volumes)} 个分卷: {[v['name'] for v in volumes]}")
+            return volumes
+
+        except Exception as e:
+            logger.error(f"获取分卷列表失败: {e}")
+            return []
+
     async def navigate_to_chapter_manage(self, book_id: Optional[str] = None) -> bool:
         """导航到章节管理页面
 
@@ -206,6 +267,53 @@ class FanqiePublisherService:
             logger.error(f"导航失败: {e}")
             return False
             
+    async def select_volume_in_editor(self, volume_name: str) -> bool:
+        """在章节编辑器中选择指定分卷
+
+        Args:
+            volume_name: 要选择的分卷名称
+
+        Returns:
+            是否成功选择
+        """
+        try:
+            # 在编辑器页面，分卷选择器通常在顶部
+            # 尝试点击分卷下拉框
+            volume_selector = await self.page.query_selector('.volume-selector, .serial-editor-volume-select, select[name="volume"]')
+
+            if not volume_selector:
+                # 尝试通过文本查找
+                logger.warning("未找到分卷选择器，尝试通过文本查找")
+                # 有些页面分卷选择是通过点击文本触发的
+                volume_text = await self.page.query_selector(f'text="{volume_name}"')
+                if volume_text:
+                    await volume_text.click()
+                    await asyncio.sleep(0.5)
+                    logger.info(f"通过文本选择了分卷: {volume_name}")
+                    return True
+                else:
+                    logger.warning(f"未找到分卷: {volume_name}，将使用默认分卷")
+                    return False
+
+            # 点击下拉框
+            await volume_selector.click()
+            await asyncio.sleep(0.5)
+
+            # 选择目标分卷
+            option = await self.page.query_selector(f'option:has-text("{volume_name}"), li:has-text("{volume_name}")')
+            if option:
+                await option.click()
+                await asyncio.sleep(0.5)
+                logger.info(f"成功选择分卷: {volume_name}")
+                return True
+            else:
+                logger.error(f"未找到分卷选项: {volume_name}")
+                return False
+
+        except Exception as e:
+            logger.error(f"选择分卷失败: {e}")
+            return False
+
     async def edit_volume_name(self, old_name: str, new_name: str) -> Dict[str, Any]:
         """编辑分卷名称
 
@@ -369,7 +477,18 @@ class FanqiePublisherService:
             await self.page.wait_for_load_state("networkidle")
             await asyncio.sleep(1)
 
-            # 3. 清理标题中的"第X章"前缀
+            # 3. 如果指定了分卷，选择对应的分卷
+            if volume_name:
+                logger.info(f"尝试选择分卷: {volume_name}")
+                volume_selected = await self.select_volume_in_editor(volume_name)
+                if not volume_selected:
+                    logger.error(f"未能选择分卷: {volume_name}，终止上传")
+                    return {
+                        "success": False,
+                        "error": f"未能选择分卷: {volume_name}，请确认分卷已创建"
+                    }
+
+            # 4. 清理标题中的"第X章"前缀
             clean_title = re.sub(r'^第[0-9一二三四五六七八九十百千万]+章\s*', '', chapter_title)
             if len(clean_title) < 5:
                 logger.warning(f"标题太短（少于5字）: {clean_title}，将添加前缀")
@@ -523,9 +642,34 @@ class FanqiePublisherService:
             # 2. 加载Cookie
             cookie_loaded = await self.load_cookies(account)
             if not cookie_loaded:
+                logger.error(f"Cookie加载失败，账号标识: {account}")
                 return {
                     "success": False,
-                    "error": "Cookie加载失败，请先手动登录并保存Cookie"
+                    "error": f"Cookie加载失败，请先调用 /api/novels/fanqie/login 接口手动登录并保存Cookie（账号标识: {account}）",
+                    "hint": "Cookie文件路径: storage/fanqie_cookies/{account}_cookies.json"
+                }
+
+            # 验证Cookie是否有效（尝试访问作家专区）
+            try:
+                await self.page.goto("https://fanqienovel.com/writer/zone/")
+                await self.page.wait_for_load_state("networkidle", timeout=10000)
+
+                # 检查是否跳转到登录页
+                current_url = self.page.url
+                if "login" in current_url or "passport" in current_url:
+                    logger.error("Cookie已失效，需要重新登录")
+                    return {
+                        "success": False,
+                        "error": "Cookie已失效，请重新调用 /api/novels/fanqie/login 接口登录",
+                        "hint": "Cookie可能已过期，请重新登录"
+                    }
+
+                logger.info("Cookie验证成功")
+            except Exception as e:
+                logger.error(f"Cookie验证失败: {e}")
+                return {
+                    "success": False,
+                    "error": f"Cookie验证失败: {str(e)}，请重新登录"
                 }
 
             # 3. 查找书籍
@@ -542,7 +686,15 @@ class FanqiePublisherService:
                 return {"success": False, "error": "导航到章节管理页面失败"}
 
             # 5. 同步分卷结构
-            # 查询所有分卷
+            # 先获取番茄小说上现有的分卷
+            existing_volumes = await self.get_all_volumes()
+            if not existing_volumes:
+                logger.error("无法获取现有分卷列表")
+                return {"success": False, "error": "无法获取现有分卷列表"}
+
+            logger.info(f"番茄小说现有分卷: {[v['name'] for v in existing_volumes]}")
+
+            # 查询本地所有分卷
             volumes_stmt = (
                 select(Volume)
                 .where(Volume.project_id == project_id)
@@ -555,9 +707,15 @@ class FanqiePublisherService:
 
             for i, volume in enumerate(volumes):
                 if i == 0:
-                    # 第一卷：编辑默认分卷名称
-                    result = await self.edit_volume_name("默认", volume.title)
-                    volume_sync_results.append(result)
+                    # 第一卷：编辑现有的第一个分卷（不管它叫什么名字）
+                    if existing_volumes:
+                        first_volume_name = existing_volumes[0]['name']
+                        logger.info(f"将第一个分卷 '{first_volume_name}' 改名为 '{volume.title}'")
+                        result = await self.edit_volume_name(first_volume_name, volume.title)
+                        volume_sync_results.append(result)
+                    else:
+                        logger.error("番茄小说上没有任何分卷")
+                        return {"success": False, "error": "番茄小说上没有任何分卷"}
                 else:
                     # 后续分卷：创建新分卷
                     result = await self.create_volume(volume.title)
