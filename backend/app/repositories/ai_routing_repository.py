@@ -5,6 +5,7 @@ import json
 import logging
 from typing import List, Optional, Dict
 from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.ai_routing import AIProvider, AIFunctionRoute, AIFunctionCallLog
@@ -62,7 +63,9 @@ class AIFunctionRouteRepository:
     async def get_by_function_type(self, function_type: str) -> Optional[AIFunctionRoute]:
         """根据功能类型获取路由配置"""
         result = await self.session.execute(
-            select(AIFunctionRoute).where(
+            select(AIFunctionRoute)
+            .options(selectinload(AIFunctionRoute.primary_provider))  # ✅ 预加载provider
+            .where(
                 and_(
                     AIFunctionRoute.function_type == function_type,
                     AIFunctionRoute.enabled == True
@@ -75,6 +78,7 @@ class AIFunctionRouteRepository:
         """获取所有启用的路由配置"""
         result = await self.session.execute(
             select(AIFunctionRoute)
+            .options(selectinload(AIFunctionRoute.primary_provider))  # ✅ 预加载provider
             .where(AIFunctionRoute.enabled == True)
             .order_by(AIFunctionRoute.function_type)
         )

@@ -108,15 +108,15 @@ class AIOrchestrator:
             f"执行AI功能: {function.value}, 主模型: {config.primary.provider}/{config.primary.model}"
         )
 
-        # 构建尝试列表：主模型 + 备用模型
-        attempts = [config.primary] + config.fallbacks
-
-        last_error = None
-        fallback_count = 0
-        start_time = time.time()
-
-        # 记录开始
+        # ✅ 使用 try-finally 确保指标一定会被清理
         ai_calls_in_progress.labels(function=function.value).inc()
+        try:
+            # 构建尝试列表：主模型 + 备用模型
+            attempts = [config.primary] + config.fallbacks
+
+            last_error = None
+            fallback_count = 0
+            start_time = time.time()
 
         # 依次尝试每个模型（带重试）
         for idx, provider_config in enumerate(attempts):
@@ -196,8 +196,7 @@ class AIOrchestrator:
                         finish_reason="stop",
                     )
 
-                    # 完成，减少计数
-                    ai_calls_in_progress.labels(function=function.value).dec()
+                    # ✅ 不在这里dec，在finally中统一处理
                     return response
 
                 except asyncio.TimeoutError as e:
@@ -263,8 +262,6 @@ class AIOrchestrator:
                 continue
             else:
                 # 所有模型都失败了
-                ai_calls_in_progress.labels(function=function.value).dec()
-
                 if config.required:
                     # 必须成功的功能，抛出错误
                     logger.error(
@@ -278,9 +275,12 @@ class AIOrchestrator:
                     )
                     return self._get_default_response(function)
 
-        # 理论上不会到这里
-        ai_calls_in_progress.labels(function=function.value).dec()
-        raise last_error
+            # 理论上不会到这里
+            raise last_error
+
+        finally:
+            # ✅ 确保一定会执行，无论成功还是失败
+            ai_calls_in_progress.labels(function=function.value).dec()
 
     def _get_default_response(self, function: AIFunctionType) -> str:
         """
@@ -361,7 +361,8 @@ class AIOrchestrator:
             )
 
             await self.log_repo.create(log)
-            await self.db_session.commit()
+            # ✅ 移除commit，让调用者控制事务边界
+            # await self.db_session.commit()
 
         except Exception as e:
             logger.error(f"记录调用日志失败: {e}")

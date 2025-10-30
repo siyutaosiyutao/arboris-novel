@@ -86,12 +86,21 @@ class LLMService:
         base_url = get_provider_base_url(provider)
         env_key = get_provider_env_key(provider)
 
-        # 从环境变量获取API Key
+        # ✅ 统一从环境变量获取API Key
         api_key = os.getenv(env_key)
-        if not api_key:
-            # 如果环境变量没有，尝试从系统配置获取
-            if provider == "openai":
-                api_key = await self._get_config_value("llm.api_key")
+
+        # ✅ 如果环境变量没有，尝试从数据库配置获取（统一处理所有provider）
+        if not api_key and self.db_session:
+            try:
+                from ..repositories.ai_routing_repository import AIProviderRepository
+                provider_repo = AIProviderRepository(self.db_session)
+                provider_obj = await provider_repo.get_by_name(provider)
+                if provider_obj and provider_obj.metadata:
+                    import json
+                    metadata = json.loads(provider_obj.metadata)
+                    api_key = metadata.get("api_key")
+            except Exception as e:
+                logger.warning(f"从数据库获取API Key失败: {e}")
 
         if not api_key:
             raise HTTPException(
