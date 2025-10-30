@@ -41,6 +41,8 @@ class AutoGeneratorService:
 
     # 存储运行中的任务
     _running_tasks: dict[int, asyncio.Task] = {}
+    # ✅ 修复：添加锁保护，避免并发修改字典时的竞态条件
+    _tasks_lock = asyncio.Lock()
 
     @classmethod
     def _get_bug_fix_mode(cls, task: AutoGeneratorTask) -> BugFixMode:
@@ -65,13 +67,17 @@ class AutoGeneratorService:
     ) -> AutoGeneratorTask:
         """创建自动生成任务"""
 
-        # 检查项目是否存在
+        # ✅ 修复：检查项目是否存在并验证所有权（防止水平越权）
         result = await db.execute(
             select(Project).where(Project.id == project_id)
         )
         project = result.scalar_one_or_none()
         if not project:
             raise ValueError(f"Project {project_id} not found")
+
+        # ✅ 修复：验证项目所有权，防止用户操作他人项目
+        if project.user_id != user_id:
+            raise ValueError(f"Unauthorized: Project {project_id} does not belong to user {user_id}")
 
         # 检查是否已有运行中的任务
         result = await db.execute(
@@ -96,9 +102,14 @@ class AutoGeneratorService:
             status="pending"
         )
 
-        db.add(task)
-        await db.commit()
-        await db.refresh(task)
+        # ✅ 修复：添加异常处理和回滚
+        try:
+            db.add(task)
+            await db.commit()
+            await db.refresh(task)
+        except Exception:
+            await db.rollback()
+            raise
 
         await cls._log(db, task.id, "info", f"自动生成任务已创建，目标章节数: {target_chapters or '无限'}")
 
@@ -133,8 +144,10 @@ class AutoGeneratorService:
         await cls._log(db, task_id, "info", "自动生成任务已启动")
 
         # 启动后台任务
+        # ✅ 修复：使用锁保护字典操作
         asyncio_task = asyncio.create_task(cls._run_generator(task_id))
-        cls._running_tasks[task_id] = asyncio_task
+        async with cls._tasks_lock:
+            cls._running_tasks[task_id] = asyncio_task
 
         await db.refresh(task)
         return task
@@ -190,9 +203,11 @@ class AutoGeneratorService:
         await cls._log(db, task_id, "info", "自动生成任务已停止")
 
         # 取消后台任务
-        if task_id in cls._running_tasks:
-            cls._running_tasks[task_id].cancel()
-            del cls._running_tasks[task_id]
+        # ✅ 修复：使用 pop() 避免 KeyError，并使用锁保护
+        async with cls._tasks_lock:
+            task_obj = cls._running_tasks.pop(task_id, None)
+            if task_obj:
+                task_obj.cancel()
 
         await db.refresh(task)
         return task
@@ -241,13 +256,24 @@ class AutoGeneratorService:
 
     @classmethod
     async def _run_generator(cls, task_id: int):
-        """后台生成任务"""
+        """后台生成任务
+
+        ✅ 修复：添加最大迭代次数和连续错误计数，避免无限循环
+        """
         from ..db.session import AsyncSessionLocal
 
         logger.info(f"[AutoGen] Starting task {task_id}")
 
+        # ✅ 修复：添加安全限制
+        MAX_ITERATIONS = 10000  # 最大迭代次数
+        MAX_CONSECUTIVE_ERRORS = 5  # 最大连续错误次数
+        iteration_count = 0
+        consecutive_errors = 0
+
         try:
-            while True:
+            while iteration_count < MAX_ITERATIONS:
+                iteration_count += 1
+
                 try:
                     async with AsyncSessionLocal() as db:
                         # 获取任务状态
@@ -283,6 +309,7 @@ class AutoGeneratorService:
                         # 生成章节
                         try:
                             await cls._generate_next_chapters(db, task)
+                            consecutive_errors = 0  # 成功后重置错误计数
                         except Exception as e:
                             logger.error(f"Error generating chapters for task {task_id}: {e}")
                             await cls._handle_error(db, task_id, str(e))
@@ -298,12 +325,24 @@ class AutoGeneratorService:
                     logger.info(f"Task {task_id} cancelled")
                     break
                 except Exception as e:
-                    logger.error(f"Unexpected error in task {task_id}: {e}")
+                    # ✅ 修复：区分临时错误和永久错误
+                    consecutive_errors += 1
+                    logger.error(f"Unexpected error in task {task_id} (consecutive: {consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {e}")
+
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        logger.error(f"Task {task_id} 连续错误次数过多，停止任务")
+                        break
+
                     await asyncio.sleep(60)  # 出错后等待1分钟再重试
+
+            # ✅ 修复：检查是否因迭代次数过多而退出
+            if iteration_count >= MAX_ITERATIONS:
+                logger.warning(f"Task {task_id} 达到最大迭代次数 {MAX_ITERATIONS}，自动停止")
         finally:
             # 确保清理资源
-            if task_id in cls._running_tasks:
-                del cls._running_tasks[task_id]
+            # ✅ 修复：使用 pop() 和锁保护
+            async with cls._tasks_lock:
+                cls._running_tasks.pop(task_id, None)
 
             logger.info(f"Auto-generator for task {task_id} finished")
 
@@ -470,9 +509,11 @@ class AutoGeneratorService:
                     )
                     existing.real_summary = remove_think_tags(summary)
                     await db.commit()
+                # ✅ 修复：避免重复调用 get() 导致的潜在 None 引用错误
+                outline = outlines_map.get(existing.chapter_number)
                 completed_chapters.append({
                     "chapter_number": existing.chapter_number,
-                    "title": outlines_map.get(existing.chapter_number).title if outlines_map.get(existing.chapter_number) else f"第{existing.chapter_number}章",
+                    "title": outline.title if outline else f"第{existing.chapter_number}章",
                     "summary": existing.real_summary,
                 })
                 previous_summary_text = existing.real_summary or ""
@@ -725,42 +766,46 @@ class AutoGeneratorService:
         task: AutoGeneratorTask,
         chapter_id: str
     ):
-        """运行创意功能分析"""
+        """
+        运行创意功能分析
+
+        ✅ 修复：改为串行执行，避免 AsyncSession 并发使用错误
+        SQLAlchemy 禁止同一 AsyncSession 被多个协程并行使用
+        """
         config = task.generation_config or {}
 
-        # 异步执行分析任务，不阻塞主流程
-        analysis_tasks = []
-
+        # ✅ 修复：串行执行分析任务，避免 AsyncSession 并发问题
         # 1. 张力分析
         if config.get("enable_tension_analysis", False):
-            analysis_tasks.append(
-                cls._analyze_tension(db, chapter_id, task.id)
-            )
+            try:
+                await cls._analyze_tension(db, chapter_id, task.id)
+            except Exception as e:
+                logger.error(f"张力分析失败: {e}")
+                await cls._log(
+                    db, task.id, "warning",
+                    f"张力分析出错: {str(e)}"
+                )
 
         # 2. 角色一致性检查
         if config.get("enable_character_consistency", False):
-            analysis_tasks.append(
-                cls._check_character_consistency(db, chapter_id, task.id)
-            )
+            try:
+                await cls._check_character_consistency(db, chapter_id, task.id)
+            except Exception as e:
+                logger.error(f"角色一致性检查失败: {e}")
+                await cls._log(
+                    db, task.id, "warning",
+                    f"角色一致性检查出错: {str(e)}"
+                )
 
         # 3. 伏笔识别
         if config.get("enable_foreshadowing", False):
-            analysis_tasks.append(
-                cls._detect_foreshadowing(db, chapter_id, task.id)
-            )
-
-        # 并发执行所有分析任务
-        if analysis_tasks:
             try:
-                results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
-                # 检查是否有错误
-                for result in results:
-                    if isinstance(result, Exception):
-                        logger.error(f"Creative analysis error: {result}")
+                await cls._detect_foreshadowing(db, chapter_id, task.id)
             except Exception as e:
+                logger.error(f"伏笔识别失败: {e}")
                 await cls._log(
                     db, task.id, "warning",
-                    f"创意功能分析出错: {str(e)}"
+                    f"伏笔识别出错: {str(e)}"
                 )
 
     @classmethod
@@ -905,13 +950,24 @@ class AutoGeneratorService:
 
         # 获取项目schema
         project_schema = await novel_service.get_project_schema(task.project_id, user_id)
+
+        # ✅ 修复：检查 blueprint 是否存在
+        if not project_schema.blueprint:
+            error_msg = "项目蓝图未创建，无法生成大纲。请先在项目设置中创建蓝图。"
+            logger.error(f"任务 {task.id}: {error_msg}")
+            await cls._log(db, task.id, "error", error_msg)
+            task.status = "failed"
+            task.error_message = error_msg
+            await db.commit()
+            return
+
         blueprint_dict = project_schema.blueprint.model_dump()
 
-        # 收集已完成章节摘要（基础模式修复）
+        # ✅ 修复：收集已完成章节摘要（修复字段访问）
         completed_summaries = []
         for chapter in project_schema.chapters:
-            # 只收集已完成且有摘要的章节
-            if chapter.selected_version and chapter.real_summary:
+            # 只收集有摘要的章节（selected_version 不是 Pydantic 字段）
+            if chapter.real_summary:
                 completed_summaries.append({
                     "chapter_number": chapter.chapter_number,
                     "title": chapter.title or f"第{chapter.chapter_number}章",

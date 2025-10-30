@@ -140,12 +140,89 @@ class AIFunctionCallLogRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None
     ) -> Dict:
-        """获取统计信息"""
-        # TODO: 实现统计查询
+        """
+        获取统计信息
+
+        ✅ 修复：实现真实的统计查询
+        """
+        from sqlalchemy import func, case
+        from datetime import datetime
+
+        # 构建基础查询
+        query = select(AIFunctionCallLog)
+
+        # 添加过滤条件
+        if function_type:
+            query = query.where(AIFunctionCallLog.function_type == function_type)
+        if start_date:
+            start_dt = datetime.fromisoformat(start_date)
+            query = query.where(AIFunctionCallLog.created_at >= start_dt)
+        if end_date:
+            end_dt = datetime.fromisoformat(end_date)
+            query = query.where(AIFunctionCallLog.created_at <= end_dt)
+
+        # 执行查询
+        result = await self.session.execute(query)
+        logs = result.scalars().all()
+
+        if not logs:
+            return {
+                "total_calls": 0,
+                "success_rate": 0.0,
+                "avg_duration_ms": 0,
+                "total_cost_usd": 0.0,
+                "by_function": {},
+                "by_provider": {}
+            }
+
+        # 计算总体统计
+        total_calls = len(logs)
+        success_count = sum(1 for log in logs if log.status == "success")
+        success_rate = (success_count / total_calls * 100) if total_calls > 0 else 0.0
+
+        durations = [log.duration_ms for log in logs if log.duration_ms is not None]
+        avg_duration_ms = int(sum(durations) / len(durations)) if durations else 0
+
+        # 计算成本（简化版，实际应该从provider获取费率）
+        total_cost_usd = 0.0
+
+        # 按功能分组统计
+        by_function = {}
+        for log in logs:
+            if log.function_type not in by_function:
+                by_function[log.function_type] = {
+                    "total": 0,
+                    "success": 0,
+                    "failed": 0
+                }
+            by_function[log.function_type]["total"] += 1
+            if log.status == "success":
+                by_function[log.function_type]["success"] += 1
+            else:
+                by_function[log.function_type]["failed"] += 1
+
+        # 按供应商分组统计
+        by_provider = {}
+        for log in logs:
+            if log.provider_id:
+                if log.provider_id not in by_provider:
+                    by_provider[log.provider_id] = {
+                        "total": 0,
+                        "success": 0,
+                        "failed": 0
+                    }
+                by_provider[log.provider_id]["total"] += 1
+                if log.status == "success":
+                    by_provider[log.provider_id]["success"] += 1
+                else:
+                    by_provider[log.provider_id]["failed"] += 1
+
         return {
-            "total_calls": 0,
-            "success_rate": 0.0,
-            "avg_duration_ms": 0,
-            "total_cost_usd": 0.0
+            "total_calls": total_calls,
+            "success_rate": round(success_rate, 2),
+            "avg_duration_ms": avg_duration_ms,
+            "total_cost_usd": round(total_cost_usd, 4),
+            "by_function": by_function,
+            "by_provider": by_provider
         }
 

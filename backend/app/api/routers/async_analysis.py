@@ -7,8 +7,9 @@
 3. 标记通知已读
 4. 手动触发重试
 """
+import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload  # ✅ 添加selectinload
@@ -20,6 +21,8 @@ from ...db.session import get_session
 from ...models.async_task import PendingAnalysis, AnalysisNotification
 from ...core.dependencies import get_current_user
 from ...schemas.user import UserInDB
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/async-analysis", tags=["异步分析"])
 
@@ -326,4 +329,145 @@ async def get_chapter_latest_task(
         error_message=task.error_message,
         error_type=task.error_type
     )
+
+
+# ✅ 修复：补齐前端需要的任务列表/详情/取消接口
+@router.get("/tasks", response_model=List[PendingAnalysisResponse])
+async def get_tasks(
+    status: Optional[str] = Query(None, description="按状态过滤"),
+    current_user: UserInDB = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session)
+):
+    """
+    获取任务列表
+
+    ✅ 修复：补齐缺失的任务列表接口
+    """
+    stmt = (
+        select(PendingAnalysis)
+        .where(PendingAnalysis.user_id == current_user.id)
+        .options(selectinload(PendingAnalysis.chapter))
+    )
+
+    if status:
+        stmt = stmt.where(PendingAnalysis.status == status)
+
+    stmt = stmt.order_by(desc(PendingAnalysis.created_at))
+
+    result = await db.execute(stmt)
+    tasks = result.scalars().all()
+
+    return [
+        PendingAnalysisResponse(
+            id=task.id,
+            chapter_id=task.chapter_id,
+            chapter_number=task.chapter.chapter_number,
+            status=task.status,
+            priority=task.priority,
+            retry_count=task.retry_count,
+            max_retries=task.max_retries,
+            created_at=task.created_at,
+            started_at=task.started_at,
+            completed_at=task.completed_at,
+            duration_seconds=task.duration_seconds,
+            error_message=task.error_message,
+            error_type=task.error_type
+        )
+        for task in tasks
+    ]
+
+
+@router.get("/tasks/{task_id}", response_model=PendingAnalysisResponse)
+async def get_task_detail(
+    task_id: int,
+    current_user: UserInDB = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session)
+):
+    """
+    获取任务详情
+
+    ✅ 修复：补齐缺失的任务详情接口
+    """
+    stmt = (
+        select(PendingAnalysis)
+        .where(
+            and_(
+                PendingAnalysis.id == task_id,
+                PendingAnalysis.user_id == current_user.id
+            )
+        )
+        .options(selectinload(PendingAnalysis.chapter))
+    )
+
+    result = await db.execute(stmt)
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"未找到任务 {task_id}"
+        )
+
+    return PendingAnalysisResponse(
+        id=task.id,
+        chapter_id=task.chapter_id,
+        chapter_number=task.chapter.chapter_number,
+        status=task.status,
+        priority=task.priority,
+        retry_count=task.retry_count,
+        max_retries=task.max_retries,
+        created_at=task.created_at,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
+        duration_seconds=task.duration_seconds,
+        error_message=task.error_message,
+        error_type=task.error_type
+    )
+
+
+@router.post("/tasks/{task_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_task(
+    task_id: int,
+    current_user: UserInDB = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session)
+):
+    """
+    取消任务
+
+    ✅ 修复：补齐缺失的取消任务接口
+    """
+    stmt = (
+        select(PendingAnalysis)
+        .where(
+            and_(
+                PendingAnalysis.id == task_id,
+                PendingAnalysis.user_id == current_user.id
+            )
+        )
+    )
+
+    result = await db.execute(stmt)
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"未找到任务 {task_id}"
+        )
+
+    # 只能取消pending或processing状态的任务
+    if task.status not in ['pending', 'processing']:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"任务状态为 {task.status}，无法取消"
+        )
+
+    # 更新状态为cancelled
+    task.status = 'cancelled'
+    task.completed_at = datetime.now()
+
+    await db.commit()
+
+    logger.info(f"用户 {current_user.username} 取消了任务 {task_id}")
+    return None
 

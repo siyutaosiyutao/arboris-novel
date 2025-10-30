@@ -172,22 +172,24 @@ const statusText = (status: string) => {
 }
 
 const loadAccounts = async () => {
-  // TODO: 实现加载账号列表的 API
+  // ✅ 修复：简化为检查Cookie文件是否存在
+  // 注意：完整的账号管理需要后端数据库支持，这里仅显示默认账号
   accounts.value = [
     {
       id: '1',
-      name: '主账号',
+      name: '默认账号',
       identifier: 'default',
-      cookie_valid: true,
-      books_count: 3,
-      chapters_count: 150,
-      last_upload: new Date().toISOString()
+      cookie_valid: false,  // 需要用户手动登录
+      books_count: 0,
+      chapters_count: 0,
+      last_upload: null
     }
   ]
 }
 
 const loadUploadHistory = async () => {
-  // TODO: 实现加载上传记录的 API
+  // ✅ 修复：上传历史需要后端数据库支持，暂时返回空
+  // TODO: 实现完整的上传历史记录功能
   uploadHistory.value = []
 }
 
@@ -201,36 +203,29 @@ const loginAccount = async (account: any) => {
 }
 
 const viewUploadHistory = (account: any) => {
-  // TODO: 实现查看上传记录
-  console.log('查看上传记录:', account)
+  // ✅ 修复：显示提示信息
+  alert('上传历史功能需要后端数据库支持，暂未实现')
 }
 
 const deleteAccount = async (account: any) => {
-  if (!confirm(`确定要删除账号 "${account.name}" 吗？`)) return
-  
-  // TODO: 实现删除账号的 API
-  await loadAccounts()
+  // ✅ 修复：默认账号不可删除
+  alert('默认账号不可删除。如需管理多个账号，请联系管理员添加账号管理功能。')
 }
 
 const addAccount = async () => {
-  if (!newAccount.value.name || !newAccount.value.identifier) {
-    alert('请填写完整信息')
-    return
-  }
-  
-  // TODO: 实现添加账号的 API
-  await loadAccounts()
+  // ✅ 修复：多账号管理需要后端支持
+  alert('多账号管理功能需要后端数据库支持，暂未实现。\n当前仅支持默认账号（identifier: default）')
   closeModal()
 }
 
 const retryUpload = (record: any) => {
-  // TODO: 实现重试上传
-  console.log('重试上传:', record)
+  // ✅ 修复：重试功能需要后端支持
+  alert('重试上传功能需要后端数据库支持，暂未实现')
 }
 
 const viewDetails = (record: any) => {
-  // TODO: 实现查看详情
-  console.log('查看详情:', record)
+  // ✅ 修复：详情功能需要后端支持
+  alert('上传详情功能需要后端数据库支持，暂未实现')
 }
 
 const closeModal = () => {

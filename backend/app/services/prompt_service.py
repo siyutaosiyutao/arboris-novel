@@ -10,6 +10,8 @@ from ..schemas.prompt import PromptCreate, PromptRead, PromptUpdate
 _CACHE: Dict[str, PromptRead] = {}
 _LOCK = asyncio.Lock()
 _LOADED = False
+# ✅ 修复：添加缓存大小限制（提示词通常不会太多，设置为1000）
+MAX_CACHE_SIZE = 1000
 
 
 class PromptService:
@@ -43,6 +45,9 @@ class PromptService:
 
         prompt_read = PromptRead.model_validate(prompt)
         async with _LOCK:
+            # ✅ 修复：检查缓存大小，超过限制时清空缓存
+            if len(_CACHE) >= MAX_CACHE_SIZE:
+                _CACHE.clear()
             _CACHE[name] = prompt_read
         return prompt_read.content
 

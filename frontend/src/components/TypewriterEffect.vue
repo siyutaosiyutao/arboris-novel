@@ -5,7 +5,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 
 const props = defineProps({
   text: {
@@ -17,16 +17,29 @@ const props = defineProps({
 const fullText = props.text;
 const displayedText = ref('');
 let index = 0;
+// ✅ 修复：保存定时器引用，防止内存泄漏
+let interval: number | null = null;
 
 onMounted(() => {
-  const interval = setInterval(() => {
+  interval = setInterval(() => {
     if (index < fullText.length) {
       displayedText.value += fullText.charAt(index);
       index++;
     } else {
-      clearInterval(interval);
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
     }
   }, 150); // Adjust typing speed here
+});
+
+// ✅ 修复：组件卸载时清理定时器
+onUnmounted(() => {
+  if (interval) {
+    clearInterval(interval);
+    interval = null;
+  }
 });
 </script>
 

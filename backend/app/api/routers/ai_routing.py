@@ -25,7 +25,8 @@ from ...repositories.ai_routing_repository import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/ai-routing", tags=["AI路由管理"])
+# ✅ 修复：统一前后端路径，改为 /api/ai
+router = APIRouter(prefix="/api/ai", tags=["AI路由管理"])
 
 
 # ==================== Schemas ====================
@@ -47,6 +48,27 @@ class AIProviderAdminSchema(AIProviderPublicSchema):
     priority: int
     cost_per_1k_tokens: Optional[float] = None
     api_key_env: Optional[str] = None
+
+
+class AIProviderCreateSchema(BaseModel):
+    """创建Provider的请求体"""
+    name: str
+    display_name: str
+    base_url: str
+    priority: int = 100
+    cost_per_1k_tokens: Optional[float] = None
+    api_key_env: Optional[str] = None
+    status: str = "active"
+
+
+class AIProviderUpdateSchema(BaseModel):
+    """更新Provider的请求体"""
+    display_name: Optional[str] = None
+    base_url: Optional[str] = None
+    priority: Optional[int] = None
+    cost_per_1k_tokens: Optional[float] = None
+    api_key_env: Optional[str] = None
+    status: Optional[str] = None
 
 
 class AIFunctionRouteSchema(BaseModel):
@@ -110,6 +132,97 @@ async def list_providers(
         return [AIProviderPublicSchema.model_validate(p) for p in providers]
 
 
+@router.post("/providers", response_model=AIProviderAdminSchema, status_code=status.HTTP_201_CREATED)
+async def create_provider(
+    provider_data: AIProviderCreateSchema,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_admin),  # ✅ 仅管理员可创建
+):
+    """
+    创建新的AI提供商
+
+    ✅ 修复：补齐缺失的 POST 接口
+    """
+    # 检查名称是否已存在
+    repo = AIProviderRepository(session)
+    existing = await repo.get_by_name(provider_data.name)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Provider名称 '{provider_data.name}' 已存在"
+        )
+
+    # 创建新Provider
+    new_provider = AIProvider(**provider_data.model_dump())
+    session.add(new_provider)
+    await session.commit()
+    await session.refresh(new_provider)
+
+    logger.info(f"管理员 {current_user.username} 创建了新Provider: {new_provider.name}")
+    return AIProviderAdminSchema.model_validate(new_provider)
+
+
+@router.put("/providers/{provider_id}", response_model=AIProviderAdminSchema)
+async def update_provider(
+    provider_id: int,
+    provider_data: AIProviderUpdateSchema,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_admin),  # ✅ 仅管理员可更新
+):
+    """
+    更新AI提供商配置
+
+    ✅ 修复：补齐缺失的 PUT 接口
+    """
+    repo = AIProviderRepository(session)
+    provider = await repo.get_by_id(provider_id)
+
+    if not provider:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"未找到ID为 {provider_id} 的Provider"
+        )
+
+    # 更新字段
+    update_data = provider_data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(provider, key, value)
+
+    await session.commit()
+    await session.refresh(provider)
+
+    logger.info(f"管理员 {current_user.username} 更新了Provider {provider_id}")
+    return AIProviderAdminSchema.model_validate(provider)
+
+
+@router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_provider(
+    provider_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_admin),  # ✅ 仅管理员可删除
+):
+    """
+    删除AI提供商（软删除，设置status为inactive）
+
+    ✅ 修复：补齐缺失的 DELETE 接口
+    """
+    repo = AIProviderRepository(session)
+    provider = await repo.get_by_id(provider_id)
+
+    if not provider:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"未找到ID为 {provider_id} 的Provider"
+        )
+
+    # 软删除
+    provider.status = "inactive"
+    await session.commit()
+
+    logger.info(f"管理员 {current_user.username} 删除了Provider {provider_id}")
+    return None
+
+
 @router.get("/routes", response_model=List[AIFunctionRouteSchema])
 async def list_routes(
     session: AsyncSession = Depends(get_session),
@@ -130,13 +243,60 @@ async def get_route(
     """获取指定功能的路由配置"""
     repo = AIFunctionRouteRepository(session)
     route = await repo.get_by_function_type(function_type)
-    
+
     if not route:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"未找到功能 {function_type} 的路由配置"
         )
-    
+
+    return route
+
+
+# ✅ 修复：添加 function-configs 别名接口（与前端调用一致）
+@router.get("/function-configs", response_model=List[AIFunctionRouteSchema])
+async def list_function_configs(
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """获取所有功能配置（routes的别名）"""
+    repo = AIFunctionRouteRepository(session)
+    routes = await repo.get_all_enabled()
+    return routes
+
+
+@router.put("/function-configs/{function_name}", response_model=AIFunctionRouteSchema)
+async def update_function_config(
+    function_name: str,
+    config_data: dict,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_admin),  # ✅ 仅管理员可更新
+):
+    """
+    更新功能配置
+
+    ✅ 修复：补齐缺失的 PUT 接口
+    """
+    repo = AIFunctionRouteRepository(session)
+    route = await repo.get_by_function_type(function_name)
+
+    if not route:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"未找到功能 {function_name} 的配置"
+        )
+
+    # 更新允许的字段
+    allowed_fields = {'primary_provider_id', 'primary_model', 'temperature',
+                     'timeout_seconds', 'max_retries', 'enabled'}
+    for key, value in config_data.items():
+        if key in allowed_fields:
+            setattr(route, key, value)
+
+    await session.commit()
+    await session.refresh(route)
+
+    logger.info(f"管理员 {current_user.username} 更新了功能配置 {function_name}")
     return route
 
 

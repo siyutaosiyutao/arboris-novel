@@ -71,6 +71,11 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as session:
         prompt_service = PromptService(session)
         await prompt_service.preload()
+
+    # ✅ 修复：启动验证码缓存清理任务
+    from .services.auth_service import start_cleanup_task
+    start_cleanup_task()
+
     yield
 
 

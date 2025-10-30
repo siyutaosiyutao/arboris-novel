@@ -6,6 +6,7 @@ from __future__ import annotations
 本文件中的注释均使用中文，便于团队成员快速理解 RAG 相关逻辑。
 """
 
+import asyncio
 import json
 import logging
 import math
@@ -79,6 +80,40 @@ class VectorStoreService:
         else:
             self._schema_ready = False
             logger.info("libsql 客户端初始化成功，等待建表。")
+
+    async def close(self) -> None:
+        """关闭向量库客户端连接
+
+        ✅ 修复：添加资源清理方法，避免连接泄漏
+        """
+        if self._client:
+            try:
+                # libsql_client 可能有 close 方法
+                if hasattr(self._client, 'close'):
+                    if asyncio.iscoroutinefunction(self._client.close):
+                        await self._client.close()
+                    else:
+                        self._client.close()
+                logger.info("libsql 客户端已关闭")
+            except Exception as e:
+                logger.warning(f"关闭 libsql 客户端时出错: {e}")
+            finally:
+                self._client = None
+                self._schema_ready = True
+
+    def __del__(self):
+        """析构函数：确保资源被释放
+
+        注意：这是最后的保障，不应依赖此方法进行资源清理
+        """
+        if self._client:
+            logger.warning("VectorStoreService 未正确关闭，在析构函数中清理资源")
+            # 同步关闭（如果支持）
+            if hasattr(self._client, 'close'):
+                try:
+                    self._client.close()
+                except Exception:
+                    pass
 
     async def ensure_schema(self) -> None:
         """初始化向量表结构，保证系统首次运行即可使用。"""

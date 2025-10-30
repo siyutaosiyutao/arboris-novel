@@ -99,7 +99,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { asyncAnalysisApi } from '@/api/novel'
 
 const tasks = ref<any[]>([])
@@ -147,10 +147,21 @@ const closeModal = () => {
   viewingTask.value = null
 }
 
+// ✅ 修复：保存定时器引用，防止内存泄漏
+let refreshTimer: number | null = null
+
 onMounted(() => {
   loadTasks()
   // 每30秒自动刷新
-  setInterval(loadTasks, 30000)
+  refreshTimer = setInterval(loadTasks, 30000)
+})
+
+// ✅ 修复：组件卸载时清理定时器
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
 })
 </script>
 

@@ -31,6 +31,10 @@ class UserService:
         except IntegrityError as exc:
             await self.session.rollback()
             raise ValueError("用户名或邮箱已存在") from exc
+        except Exception:
+            # ✅ 修复：捕获所有异常并回滚
+            await self.session.rollback()
+            raise
 
         return UserInDB.model_validate(user)
 

@@ -22,6 +22,18 @@ class FanqiePublisherService:
     基于实际测试的番茄小说平台流程
     """
 
+    # ✅ 修复：提取配置常量，避免硬编码
+    # 超时配置（毫秒）
+    PAGE_LOAD_TIMEOUT = 30000  # 页面加载超时
+    NAVIGATION_TIMEOUT = 30000  # 导航超时
+    SELECTOR_TIMEOUT = 10000   # 元素查找超时
+
+    # 等待时间配置（秒）
+    PAGE_LOAD_WAIT = 2.0      # 页面加载后等待
+    CLICK_WAIT = 0.5          # 点击后等待
+    DIALOG_WAIT = 1.0         # 对话框等待
+    INPUT_WAIT = 0.3          # 输入后等待
+
     def __init__(self, cookies_dir: str = "storage/fanqie_cookies", headless: bool = False):
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
@@ -47,30 +59,50 @@ class FanqiePublisherService:
         Args:
             headless: 是否使用无头模式(默认使用构造函数中的设置)
                      生产环境建议设置为True
+
+        ✅ 修复：确保资源创建失败时正确清理已创建的资源
         """
         if headless is None:
             headless = self.headless
 
-        self.playwright = await async_playwright().start()
+        try:
+            self.playwright = await async_playwright().start()
 
-        # 配置浏览器启动参数
-        launch_options = {
-            "headless": headless,
-        }
+            # 配置浏览器启动参数
+            launch_options = {
+                "headless": headless,
+            }
 
-        # 如果是headless模式，添加一些额外的参数确保兼容性
-        if headless:
-            launch_options["args"] = [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ]
+            # 如果是headless模式，添加一些额外的参数确保兼容性
+            if headless:
+                launch_options["args"] = [
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                ]
 
-        self.browser = await self.playwright.chromium.launch(**launch_options)
-        self.context = await self.browser.new_context()
-        self.page = await self.context.new_page()
-        logger.info(f"浏览器初始化完成 (headless={headless})")
+            try:
+                self.browser = await self.playwright.chromium.launch(**launch_options)
+                try:
+                    self.context = await self.browser.new_context()
+                    try:
+                        self.page = await self.context.new_page()
+                        logger.info(f"浏览器初始化完成 (headless={headless})")
+                    except Exception:
+                        await self.context.close()
+                        raise
+                except Exception:
+                    await self.browser.close()
+                    raise
+            except Exception:
+                await self.playwright.stop()
+                raise
+        except Exception as e:
+            # 确保所有资源都被清理
+            logger.error(f"浏览器初始化失败: {e}")
+            await self.close()
+            raise
         
     async def close(self):
         """关闭浏览器"""
@@ -84,6 +116,28 @@ class FanqiePublisherService:
             await self.playwright.stop()
         logger.info("浏览器已关闭")
         
+    @staticmethod
+    def _validate_account_identifier(account: str) -> str:
+        """
+        验证并清理账号标识，防止路径遍历攻击
+
+        ✅ 修复：防止路径遍历漏洞（CVE级别安全问题）
+        """
+        import re
+
+        # 只允许字母、数字、下划线和连字符
+        if not re.match(r'^[a-zA-Z0-9_-]+$', account):
+            raise ValueError(
+                f"无效的账号标识: {account}。"
+                "只允许使用字母、数字、下划线和连字符。"
+            )
+
+        # 限制长度
+        if len(account) > 64:
+            raise ValueError("账号标识长度不能超过64个字符")
+
+        return account
+
     async def load_cookies(self, account: str = "default"):
         """加载保存的Cookie
 
@@ -91,7 +145,16 @@ class FanqiePublisherService:
             account: 账号标识（用于区分不同账号的cookie）
         """
         try:
-            cookies_file = self.cookies_dir / f"{account}_cookies.json"
+            # ✅ 修复：验证账号标识，防止路径遍历
+            safe_account = self._validate_account_identifier(account)
+            cookies_file = self.cookies_dir / f"{safe_account}_cookies.json"
+
+            # ✅ 修复：确保文件路径在 cookies_dir 内
+            cookies_file = cookies_file.resolve()
+            if not str(cookies_file).startswith(str(self.cookies_dir.resolve())):
+                logger.error(f"路径遍历攻击尝试: {account}")
+                return False
+
             if not cookies_file.exists():
                 logger.warning(f"Cookie文件不存在: {cookies_file}")
                 return False
@@ -101,6 +164,9 @@ class FanqiePublisherService:
             await self.context.add_cookies(cookies)
             logger.info(f"成功加载Cookie: {cookies_file}")
             return True
+        except ValueError as e:
+            logger.error(f"账号标识验证失败: {e}")
+            return False
         except Exception as e:
             logger.error(f"加载Cookie失败: {e}")
             return False
@@ -112,12 +178,24 @@ class FanqiePublisherService:
             account: 账号标识（用于区分不同账号的cookie）
         """
         try:
-            cookies_file = self.cookies_dir / f"{account}_cookies.json"
+            # ✅ 修复：验证账号标识，防止路径遍历
+            safe_account = self._validate_account_identifier(account)
+            cookies_file = self.cookies_dir / f"{safe_account}_cookies.json"
+
+            # ✅ 修复：确保文件路径在 cookies_dir 内
+            cookies_file = cookies_file.resolve()
+            if not str(cookies_file).startswith(str(self.cookies_dir.resolve())):
+                logger.error(f"路径遍历攻击尝试: {account}")
+                return False
+
             cookies = await self.context.cookies()
             with open(cookies_file, 'w', encoding='utf-8') as f:
                 json.dump(cookies, f, indent=2, ensure_ascii=False)
             logger.info(f"成功保存Cookie: {cookies_file}")
             return True
+        except ValueError as e:
+            logger.error(f"账号标识验证失败: {e}")
+            return False
         except Exception as e:
             logger.error(f"保存Cookie失败: {e}")
             return False
@@ -206,7 +284,7 @@ class FanqiePublisherService:
             edit_btn = await self.page.query_selector('button:has-text("编辑分卷")')
             if edit_btn:
                 await edit_btn.click()
-                await asyncio.sleep(1)
+                await asyncio.sleep(self.DIALOG_WAIT)
 
             volumes = await self.page.evaluate('''() => {
                 const volumeItems = document.querySelectorAll('.chapter-volume-list-item-normal');
@@ -227,7 +305,7 @@ class FanqiePublisherService:
             cancel_btn = await self.page.query_selector('button:has-text("取消")')
             if cancel_btn:
                 await cancel_btn.click()
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(self.CLICK_WAIT)
 
             logger.info(f"获取到 {len(volumes)} 个分卷: {[v['name'] for v in volumes]}")
             return volumes
@@ -244,6 +322,8 @@ class FanqiePublisherService:
 
         Returns:
             是否成功导航
+
+        ✅ 修复：添加超时配置，避免无限等待
         """
         try:
             if book_id:
@@ -257,11 +337,14 @@ class FanqiePublisherService:
             # URL格式: /main/writer/chapter-manage/{book_id}&{book_name}?type=1
             # 但是book_name可以省略，直接用book_id
             url = f"https://fanqienovel.com/main/writer/chapter-manage/{self.book_id}?type=1"
-            await self.page.goto(url)
-            await self.page.wait_for_load_state("networkidle")
-            await asyncio.sleep(2)
+            await self.page.goto(url, timeout=self.NAVIGATION_TIMEOUT)
+            await self.page.wait_for_load_state("networkidle", timeout=self.PAGE_LOAD_TIMEOUT)
+            await asyncio.sleep(self.PAGE_LOAD_WAIT)
             logger.info(f"成功导航到章节管理页面: {self.book_id}")
             return True
+        except PlaywrightTimeoutError:
+            logger.error(f"页面加载超时: {url}")
+            return False
         except Exception as e:
             logger.error(f"导航失败: {e}")
             return False
@@ -456,6 +539,15 @@ class FanqiePublisherService:
         Returns:
             发布结果
         """
+        # ✅ 修复：添加输入参数验证
+        if not content:
+            logger.error("章节内容为空")
+            return {"success": False, "error": "章节内容不能为空"}
+
+        if chapter_number <= 0:
+            logger.error(f"无效的章节号: {chapter_number}")
+            return {"success": False, "error": "章节号必须大于0"}
+
         try:
             # 1. 点击"新建章节"按钮
             new_chapter_btn = await self.page.query_selector('button:has-text("新建章节"), a:has-text("新建章节")')
@@ -488,6 +580,11 @@ class FanqiePublisherService:
                     }
 
             # 4. 清理标题中的"第X章"前缀
+            # ✅ 修复：添加空值检查
+            if not chapter_title:
+                chapter_title = f"第{chapter_number}章"
+                logger.warning(f"章节标题为空，使用默认标题: {chapter_title}")
+
             clean_title = re.sub(r'^第[0-9一二三四五六七八九十百千万]+章\s*', '', chapter_title)
             if len(clean_title) < 5:
                 logger.warning(f"标题太短（少于5字）: {clean_title}，将添加前缀")

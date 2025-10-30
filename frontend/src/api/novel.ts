@@ -6,6 +6,19 @@ import router from '@/router'
 export const API_BASE_URL = import.meta.env.MODE === 'production' ? '' : 'http://127.0.0.1:8001'
 export const API_PREFIX = '/api'
 
+// ✅ 修复：统一的 API 路由配置，避免硬编码
+export const API_ROUTES = {
+  NOVELS: `${API_PREFIX}/novels`,
+  WRITER: `${API_PREFIX}/writer`,
+  ADMIN: `${API_PREFIX}/admin`,
+  AUTH: `${API_PREFIX}/auth`,
+  UPDATES: `${API_PREFIX}/updates`,
+  LLM_CONFIG: `${API_PREFIX}/llm-config`,
+  AI_ROUTING: `${API_PREFIX}/ai-routing`,
+  AUTO_GENERATOR: `${API_PREFIX}/auto-generator`,
+  ASYNC_ANALYSIS: `${API_PREFIX}/async-analysis`,
+} as const
+
 // 统一的请求处理函数
 const request = async (url: string, options: RequestInit = {}) => {
   const authStore = useAuthStore()
@@ -143,9 +156,9 @@ export interface NovelSectionResponse {
   data: Record<string, any>
 }
 
-// API 函数
-const NOVELS_BASE = `${API_BASE_URL}${API_PREFIX}/novels`
-const WRITER_PREFIX = '/api/writer'
+// API 函数 - 使用统一的路由配置
+const NOVELS_BASE = `${API_BASE_URL}${API_ROUTES.NOVELS}`
+const WRITER_PREFIX = API_ROUTES.WRITER
 const WRITER_BASE = `${API_BASE_URL}${WRITER_PREFIX}/novels`
 
 export class NovelAPI {

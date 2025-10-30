@@ -24,6 +24,52 @@ from ..schemas.user import AuthOptions, Token, UserCreate, UserInDB, UserRegistr
 
 _VERIFICATION_CACHE: Dict[str, tuple[str, float]] = {}
 _LAST_SEND_TIME: Dict[str, float] = {}
+# ✅ 修复：添加锁保护，避免并发修改字典时的竞态条件
+_CACHE_LOCK = asyncio.Lock()
+# ✅ 修复：添加定期清理任务标志
+_CLEANUP_TASK: Optional[asyncio.Task] = None
+
+
+async def _cleanup_expired_codes():
+    """定期清理过期的验证码
+
+    ✅ 修复：添加定期清理任务，避免内存泄漏
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    while True:
+        try:
+            await asyncio.sleep(300)  # 每5分钟清理一次
+            now = time.time()
+            async with _CACHE_LOCK:
+                # 清理过期的验证码
+                expired_emails = [
+                    email for email, (_, expire_at) in _VERIFICATION_CACHE.items()
+                    if now > expire_at
+                ]
+                for email in expired_emails:
+                    _VERIFICATION_CACHE.pop(email, None)
+
+                # 清理超过1小时的发送时间记录
+                old_emails = [
+                    email for email, send_time in _LAST_SEND_TIME.items()
+                    if now - send_time > 3600
+                ]
+                for email in old_emails:
+                    _LAST_SEND_TIME.pop(email, None)
+
+                if expired_emails or old_emails:
+                    logger.info(f"清理过期验证码: {len(expired_emails)}个, 清理发送记录: {len(old_emails)}个")
+        except Exception as e:
+            logger.error(f"清理验证码缓存时出错: {e}")
+
+
+def start_cleanup_task():
+    """启动清理任务"""
+    global _CLEANUP_TASK
+    if _CLEANUP_TASK is None or _CLEANUP_TASK.done():
+        _CLEANUP_TASK = asyncio.create_task(_cleanup_expired_codes())
 
 
 class AuthService:
@@ -65,7 +111,7 @@ class AuthService:
         if payload.email and await self.user_repo.get_by_email(payload.email):
             raise HTTPException(status_code=400, detail="邮箱已被使用")
 
-        if not self.verify_code(payload.email, payload.verification_code):
+        if not await self.verify_code(payload.email, payload.verification_code):
             raise HTTPException(status_code=400, detail="验证码错误或已过期")
 
         hashed_password = hash_password(payload.password)
@@ -85,13 +131,16 @@ class AuthService:
     async def send_verification_code(self, email: str) -> None:
         if not await self.is_registration_enabled():
             raise HTTPException(status_code=403, detail="当前暂未开放注册")
-        now = time.time()
-        if email in self._last_send_time and now - self._last_send_time[email] < 60:
-            raise HTTPException(status_code=429, detail="请稍后再试，1分钟内不可重复发送")
 
-        code = "".join(random.choices(string.digits, k=6))
-        self._verification_cache[email] = (code, now + 300)
-        self._last_send_time[email] = now
+        # ✅ 修复：使用锁保护缓存操作
+        now = time.time()
+        async with _CACHE_LOCK:
+            if email in self._last_send_time and now - self._last_send_time[email] < 60:
+                raise HTTPException(status_code=429, detail="请稍后再试，1分钟内不可重复发送")
+
+            code = "".join(random.choices(string.digits, k=6))
+            self._verification_cache[email] = (code, now + 300)
+            self._last_send_time[email] = now
 
         smtp_config = await self._load_smtp_config()
         if not smtp_config:
@@ -99,20 +148,26 @@ class AuthService:
 
         await self._send_email(email, code, smtp_config)
 
-    def verify_code(self, email: str | None, code: str) -> bool:
+    async def verify_code(self, email: str | None, code: str) -> bool:
+        """验证验证码
+
+        ✅ 修复：改为异步方法并使用锁保护缓存操作
+        """
         if not email:
             return False
-        cached = self._verification_cache.get(email)
-        if not cached:
-            return False
-        expected, expire_at = cached
-        if time.time() > expire_at:
+
+        async with _CACHE_LOCK:
+            cached = self._verification_cache.get(email)
+            if not cached:
+                return False
+            expected, expire_at = cached
+            if time.time() > expire_at:
+                self._verification_cache.pop(email, None)
+                return False
+            if code != expected:
+                return False
             self._verification_cache.pop(email, None)
-            return False
-        if code != expected:
-            return False
-        self._verification_cache.pop(email, None)
-        return True
+            return True
 
     async def _load_smtp_config(self) -> Optional[Dict[str, str]]:
         keys = [
@@ -137,7 +192,12 @@ class AuthService:
     async def _send_email(self, to_email: str, code: str, smtp_config: Dict[str, str]) -> None:
         logger = logging.getLogger(__name__)
         server = smtp_config["smtp.server"]
-        port = int(smtp_config.get("smtp.port", "465"))
+        # ✅ 修复：添加类型转换异常处理
+        try:
+            port = int(smtp_config.get("smtp.port", "465"))
+        except (ValueError, TypeError) as e:
+            logger.error(f"SMTP端口配置无效: {smtp_config.get('smtp.port')}, 使用默认值465")
+            port = 465
         username = smtp_config["smtp.username"]
         password = smtp_config["smtp.password"]
         from_value = smtp_config.get("smtp.from") or username

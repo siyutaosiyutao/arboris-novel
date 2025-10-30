@@ -96,10 +96,12 @@ async def generate_chapter(
             )
             existing.real_summary = remove_think_tags(summary)
             await session.commit()
+        # ✅ 修复：避免重复调用 get() 导致的潜在 None 引用错误
+        outline = outlines_map.get(existing.chapter_number)
         completed_chapters.append(
             {
                 "chapter_number": existing.chapter_number,
-                "title": outlines_map.get(existing.chapter_number).title if outlines_map.get(existing.chapter_number) else f"第{existing.chapter_number}章",
+                "title": outline.title if outline else f"第{existing.chapter_number}章",
                 "summary": existing.real_summary,
             }
         )

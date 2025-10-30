@@ -29,6 +29,7 @@ class LLMService:
 
     def __init__(self, session):
         self.session = session
+        self.db_session = session  # ✅ 修复：添加 db_session 别名以保持兼容性
         self.llm_repo = LLMConfigRepository(session)
         self.system_config_repo = SystemConfigRepository(session)
         self.user_repo = UserRepository(session)
