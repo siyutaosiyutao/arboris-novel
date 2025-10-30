@@ -54,12 +54,49 @@ class LLMClient:
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
 
-        stream = await self._client.chat.completions.create(**payload)
-        async for chunk in stream:
-            if not chunk.choices:
-                continue
-            choice = chunk.choices[0]
-            yield {
-                "content": choice.delta.content,
-                "finish_reason": choice.finish_reason,
-            }
+        async def _yield_final(resp_obj):
+            # 非流式响应的统一输出
+            if getattr(resp_obj, "choices", None):
+                choice = resp_obj.choices[0]
+                content = getattr(getattr(choice, "message", None), "content", None)
+                finish = getattr(choice, "finish_reason", None)
+                yield {"content": content, "finish_reason": finish}
+
+        try:
+            stream = await self._client.chat.completions.create(**payload)
+            # 流式正常路径
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                yield {
+                    "content": choice.delta.content,
+                    "finish_reason": choice.finish_reason,
+                }
+            return
+        except Exception as exc:
+            text = str(exc).lower()
+            # 兼容部分提供商在 json 模式下不支持 stream 或报 "prefix ... json mode"/code 20033
+            if response_format and ("json mode" in text or "20033" in text or "prefix" in text):
+                # 1) 关闭流式，再试一次（多数兼容端点要求 json 模式非流式）
+                payload_no_stream = {**payload, "stream": False}
+                try:
+                    resp = await self._client.chat.completions.create(**payload_no_stream)
+                    async for item in _yield_final(resp):
+                        yield item
+                    return
+                except Exception:
+                    # 2) 去掉 json 响应约束，退回普通流式
+                    pass
+
+            # 最后兜底：去掉 response_format 再流式请求
+            payload_fallback = {k: v for k, v in payload.items() if k != "response_format"}
+            stream = await self._client.chat.completions.create(**payload_fallback)
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                yield {
+                    "content": choice.delta.content,
+                    "finish_reason": choice.finish_reason,
+                }
