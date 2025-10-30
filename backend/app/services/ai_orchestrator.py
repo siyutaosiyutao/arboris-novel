@@ -118,165 +118,165 @@ class AIOrchestrator:
             fallback_count = 0
             start_time = time.time()
 
-        # 依次尝试每个模型（带重试）
-        for idx, provider_config in enumerate(attempts):
-            is_fallback = idx > 0
-            if is_fallback:
-                fallback_count += 1
+            # 依次尝试每个模型（带重试）
+            for idx, provider_config in enumerate(attempts):
+                is_fallback = idx > 0
+                if is_fallback:
+                    fallback_count += 1
 
-            attempt_label = f"备用模型{idx}" if is_fallback else "主模型"
+                attempt_label = f"备用模型{idx}" if is_fallback else "主模型"
 
-            # 重试逻辑
-            max_retries = config.max_retries if not is_fallback else 1
-            for retry in range(max_retries):
-                retry_label = f"重试{retry+1}/{max_retries}" if retry > 0 else ""
-
-                logger.info(
-                    f"尝试 {attempt_label} {retry_label}: "
-                    f"{provider_config.provider}/{provider_config.model}"
-                )
-
-                call_start = time.time()
-                error_type = None
-                error_message = None
-                finish_reason = None
-
-                try:
-                    # 调用LLMService.invoke
-                    response = await self.llm_service.invoke(
-                        provider=provider_config.provider,
-                        model=provider_config.model,
-                        messages=messages,
-                        temperature=final_temperature,
-                        timeout=final_timeout,
-                        response_format=response_format,
-                        user_id=user_id,
-                    )
-
-                    duration_ms = int((time.time() - call_start) * 1000)
-                    duration_seconds = duration_ms / 1000.0
+                # 重试逻辑
+                max_retries = config.max_retries if not is_fallback else 1
+                for retry in range(max_retries):
+                    retry_label = f"重试{retry+1}/{max_retries}" if retry > 0 else ""
 
                     logger.info(
-                        f"✅ {attempt_label} 调用成功: "
-                        f"{provider_config.provider}/{provider_config.model}, "
-                        f"耗时: {duration_ms}ms"
+                        f"尝试 {attempt_label} {retry_label}: "
+                        f"{provider_config.provider}/{provider_config.model}"
                     )
 
-                    # 记录Prometheus指标
+                    call_start = time.time()
+                    error_type = None
+                    error_message = None
+                    finish_reason = None
+
+                    try:
+                        # 调用LLMService.invoke
+                        response = await self.llm_service.invoke(
+                            provider=provider_config.provider,
+                            model=provider_config.model,
+                            messages=messages,
+                            temperature=final_temperature,
+                            timeout=final_timeout,
+                            response_format=response_format,
+                            user_id=user_id,
+                        )
+
+                        duration_ms = int((time.time() - call_start) * 1000)
+                        duration_seconds = duration_ms / 1000.0
+
+                        logger.info(
+                            f"✅ {attempt_label} 调用成功: "
+                            f"{provider_config.provider}/{provider_config.model}, "
+                            f"耗时: {duration_ms}ms"
+                        )
+
+                        # 记录Prometheus指标
+                        ai_calls_total.labels(
+                            function=function.value,
+                            provider=provider_config.provider,
+                            status="success"
+                        ).inc()
+
+                        ai_duration_seconds.labels(
+                            function=function.value,
+                            provider=provider_config.provider
+                        ).observe(duration_seconds)
+
+                        if is_fallback:
+                            ai_fallback_total.labels(
+                                function=function.value,
+                                from_provider=config.primary.provider,
+                                to_provider=provider_config.provider
+                            ).inc()
+
+                        # 记录成功日志到数据库
+                        await self._log_call(
+                            function=function,
+                            provider=provider_config.provider,
+                            model=provider_config.model,
+                            status="success",
+                            is_fallback=is_fallback,
+                            fallback_count=fallback_count,
+                            duration_ms=duration_ms,
+                            user_id=user_id,
+                            temperature=final_temperature,
+                            timeout=final_timeout,
+                            finish_reason="stop",
+                        )
+
+                        # ✅ 不在这里dec，在finally中统一处理
+                        return response
+
+                    except asyncio.TimeoutError as e:
+                        error_type = "timeout"
+                        error_message = str(e)
+                        last_error = e
+                        logger.warning(f"⏱️ {attempt_label} 超时")
+
+                    except Exception as e:
+                        error_type = self._classify_error(e)
+                        error_message = str(e)
+                        last_error = e
+                        logger.warning(
+                            f"❌ {attempt_label} 调用失败: "
+                            f"{provider_config.provider}/{provider_config.model}, "
+                            f"错误类型: {error_type}, 错误: {str(e)}"
+                        )
+
+                    # 记录失败指标
+                    duration_ms = int((time.time() - call_start) * 1000)
+
                     ai_calls_total.labels(
                         function=function.value,
                         provider=provider_config.provider,
-                        status="success"
+                        status="failed"
                     ).inc()
 
-                    ai_duration_seconds.labels(
+                    ai_error_total.labels(
                         function=function.value,
-                        provider=provider_config.provider
-                    ).observe(duration_seconds)
+                        provider=provider_config.provider,
+                        error_type=error_type or "unknown"
+                    ).inc()
 
-                    if is_fallback:
-                        ai_fallback_total.labels(
-                            function=function.value,
-                            from_provider=config.primary.provider,
-                            to_provider=provider_config.provider
-                        ).inc()
-
-                    # 记录成功日志到数据库
+                    # 记录失败日志到数据库
                     await self._log_call(
                         function=function,
                         provider=provider_config.provider,
                         model=provider_config.model,
-                        status="success",
+                        status="failed",
                         is_fallback=is_fallback,
                         fallback_count=fallback_count,
                         duration_ms=duration_ms,
                         user_id=user_id,
                         temperature=final_temperature,
                         timeout=final_timeout,
-                        finish_reason="stop",
+                        error_type=error_type,
+                        error_message=error_message,
                     )
 
-                    # ✅ 不在这里dec，在finally中统一处理
-                    return response
+                    # 如果还有重试机会，等待后重试
+                    if retry < max_retries - 1:
+                        wait_time = self._calculate_backoff(retry)
+                        logger.info(f"等待 {wait_time}s 后重试...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        # 重试次数用完，尝试下一个模型
+                        break
 
-                except asyncio.TimeoutError as e:
-                    error_type = "timeout"
-                    error_message = str(e)
-                    last_error = e
-                    logger.warning(f"⏱️ {attempt_label} 超时")
-
-                except Exception as e:
-                    error_type = self._classify_error(e)
-                    error_message = str(e)
-                    last_error = e
-                    logger.warning(
-                        f"❌ {attempt_label} 调用失败: "
-                        f"{provider_config.provider}/{provider_config.model}, "
-                        f"错误类型: {error_type}, 错误: {str(e)}"
-                    )
-
-                # 记录失败指标
-                duration_ms = int((time.time() - call_start) * 1000)
-
-                ai_calls_total.labels(
-                    function=function.value,
-                    provider=provider_config.provider,
-                    status="failed"
-                ).inc()
-
-                ai_error_total.labels(
-                    function=function.value,
-                    provider=provider_config.provider,
-                    error_type=error_type or "unknown"
-                ).inc()
-
-                # 记录失败日志到数据库
-                await self._log_call(
-                    function=function,
-                    provider=provider_config.provider,
-                    model=provider_config.model,
-                    status="failed",
-                    is_fallback=is_fallback,
-                    fallback_count=fallback_count,
-                    duration_ms=duration_ms,
-                    user_id=user_id,
-                    temperature=final_temperature,
-                    timeout=final_timeout,
-                    error_type=error_type,
-                    error_message=error_message,
-                )
-
-                # 如果还有重试机会，等待后重试
-                if retry < max_retries - 1:
-                    wait_time = self._calculate_backoff(retry)
-                    logger.info(f"等待 {wait_time}s 后重试...")
-                    await asyncio.sleep(wait_time)
+                # 如果还有备用模型，继续尝试
+                if idx < len(attempts) - 1:
+                    logger.info(f"切换到下一个模型...")
                     continue
                 else:
-                    # 重试次数用完，尝试下一个模型
-                    break
+                    # 所有模型都失败了
+                    if config.required:
+                        # 必须成功的功能，抛出错误
+                        logger.error(
+                            f"所有模型都失败了，功能 {function.value} 无法完成"
+                        )
+                        raise last_error
+                    else:
+                        # 可选功能，返回默认值
+                        logger.warning(
+                            f"所有模型都失败了，功能 {function.value} 返回默认值"
+                        )
+                        return self._get_default_response(function)
 
-            # 如果还有备用模型，继续尝试
-            if idx < len(attempts) - 1:
-                logger.info(f"切换到下一个模型...")
-                continue
-            else:
-                # 所有模型都失败了
-                if config.required:
-                    # 必须成功的功能，抛出错误
-                    logger.error(
-                        f"所有模型都失败了，功能 {function.value} 无法完成"
-                    )
-                    raise last_error
-                else:
-                    # 可选功能，返回默认值
-                    logger.warning(
-                        f"所有模型都失败了，功能 {function.value} 返回默认值"
-                    )
-                    return self._get_default_response(function)
-
-            # 理论上不会到这里
-            raise last_error
+                # 理论上不会到这里
+                raise last_error
 
         finally:
             # ✅ 确保一定会执行，无论成功还是失败
