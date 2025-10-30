@@ -182,6 +182,12 @@ class AsyncAnalysisProcessor:
                     await db.commit()
                     record_success('enhanced', 'async_analysis')
                     logger.info(f"任务 {pending_id} 处理成功")
+
+                    # ✅ 6. 记录剧情指标（用于自动分卷）
+                    await self._record_story_metrics(db, pending, result)
+
+                    # ✅ 7. 评估是否需要自动分卷
+                    await self._evaluate_volume_split(db, pending)
                 else:
                     raise Exception("分析结果为空")
 
@@ -331,8 +337,90 @@ class AsyncAnalysisProcessor:
             )
             db.add(notification)
             await db.commit()
-            
+
             logger.info(f"已发送通知: {title}")
         except Exception as e:
             logger.error(f"发送通知失败: {e}", exc_info=True)
+
+    async def _record_story_metrics(
+        self,
+        db: AsyncSession,
+        pending: PendingAnalysis,
+        result: dict
+    ):
+        """
+        记录剧情指标（用于自动分卷）
+
+        参数:
+            db: 数据库session
+            pending: 待处理任务
+            result: 分析结果
+        """
+        try:
+            from .story_metrics_service import StoryMetricsService
+
+            chapter = pending.chapter
+            enhanced_result = result.get("enhanced", {})
+            basic_result = result.get("basic", {})
+
+            # 获取字数
+            word_count = len(chapter.selected_version.content) if chapter.selected_version else 0
+
+            # 记录指标
+            await StoryMetricsService.record_metrics(
+                db=db,
+                project_id=pending.project_id,
+                chapter_id=pending.chapter_id,
+                chapter_number=chapter.chapter_number,
+                enhanced_result=enhanced_result,
+                summary_result=basic_result,
+                word_count=word_count,
+                config=pending.generation_config
+            )
+
+            logger.info(f"章节 {chapter.chapter_number} 剧情指标已记录")
+
+        except Exception as e:
+            logger.error(f"记录剧情指标失败: {e}", exc_info=True)
+            # 不阻塞主流程
+
+    async def _evaluate_volume_split(
+        self,
+        db: AsyncSession,
+        pending: PendingAnalysis
+    ):
+        """
+        评估是否需要自动分卷
+
+        参数:
+            db: 数据库session
+            pending: 待处理任务
+        """
+        try:
+            from .volume_split_service import VolumeSplitService
+
+            # 获取配置
+            config = pending.generation_config.get("volume_split") if pending.generation_config else None
+
+            # 如果配置禁用，直接返回
+            if config and not config.get("enabled", True):
+                return
+
+            # 创建LLM服务
+            llm_service = self.llm_service_factory(db)
+
+            # 评估分卷
+            split_service = VolumeSplitService(db, llm_service)
+            new_volume = await split_service.evaluate_project(
+                project_id=pending.project_id,
+                task_id=pending.task_id,
+                config=config
+            )
+
+            if new_volume:
+                logger.info(f"已自动创建新卷: {new_volume.title}")
+
+        except Exception as e:
+            logger.error(f"评估自动分卷失败: {e}", exc_info=True)
+            # 不阻塞主流程
 

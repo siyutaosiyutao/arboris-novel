@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, BadRequestError, InternalServerError
 
 from ..core.config import settings
+from ..config.ai_function_config import get_provider_base_url, get_provider_env_key
 from ..repositories.llm_config_repository import LLMConfigRepository
 from ..repositories.system_config_repository import SystemConfigRepository
 from ..repositories.user_repository import UserRepository
@@ -54,6 +55,93 @@ class LLMService:
             timeout=timeout,
             response_format=response_format,
         )
+
+    async def invoke(
+        self,
+        provider: str,
+        model: str,
+        messages: List[Dict[str, str]],
+        *,
+        temperature: float = 0.7,
+        timeout: float = 300.0,
+        response_format: Optional[str] = None,
+        user_id: Optional[int] = None,
+    ) -> str:
+        """
+        统一的LLM调用接口，支持指定provider和model
+
+        Args:
+            provider: API提供商 ("siliconflow" / "gemini" / "openai" / "deepseek")
+            model: 模型名称
+            messages: 消息列表
+            temperature: 温度参数
+            timeout: 超时时间
+            response_format: 响应格式
+            user_id: 用户ID（用于配额控制）
+
+        Returns:
+            LLM响应文本
+        """
+        # 获取provider配置
+        base_url = get_provider_base_url(provider)
+        env_key = get_provider_env_key(provider)
+
+        # 从环境变量获取API Key
+        api_key = os.getenv(env_key)
+        if not api_key:
+            # 如果环境变量没有，尝试从系统配置获取
+            if provider == "openai":
+                api_key = await self._get_config_value("llm.api_key")
+
+        if not api_key:
+            raise HTTPException(
+                status_code=500,
+                detail=f"未配置 {provider} 的 API Key，请设置环境变量 {env_key}"
+            )
+
+        # 构建端点配置
+        endpoint_config = {
+            "api_key": api_key,
+            "base_url": base_url,
+            "model": model,
+        }
+
+        logger.info(
+            f"调用 {provider} API: model={model}, base_url={base_url}, messages={len(messages)}"
+        )
+
+        # 使用现有的调用逻辑
+        chat_messages = [ChatMessage(role=msg["role"], content=msg["content"]) for msg in messages]
+
+        try:
+            client = LLMClient(
+                api_key=endpoint_config["api_key"],
+                base_url=endpoint_config.get("base_url")
+            )
+
+            full_response = ""
+            async for chunk in client.stream_chat(
+                messages=chat_messages,
+                model=endpoint_config["model"],
+                temperature=temperature,
+                timeout=timeout,
+                response_format=response_format,
+            ):
+                full_response += chunk
+
+            # 记录使用量
+            if user_id:
+                await self.usage_service.increment_usage(user_id)
+
+            logger.info(f"{provider} API 调用成功，响应长度: {len(full_response)}")
+            return full_response
+
+        except Exception as e:
+            logger.error(f"{provider} API 调用失败: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"{provider} API 调用失败: {str(e)}"
+            )
 
     async def get_summary(
         self,
