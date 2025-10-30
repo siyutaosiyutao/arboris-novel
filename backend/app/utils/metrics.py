@@ -3,13 +3,65 @@ Prometheus监控指标定义
 
 用于追踪增强模式性能、成本和错误
 """
-from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import Counter, Histogram, Gauge, Summary
 import time
 from contextlib import contextmanager
 from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+# ==================== AI路由系统指标 ====================
+
+# AI调用总次数（按功能、provider、状态分类）
+ai_calls_total = Counter(
+    'ai_calls_total',
+    'Total AI function calls',
+    ['function', 'provider', 'status']
+)
+
+# AI调用耗时分布
+ai_duration_seconds = Histogram(
+    'ai_duration_seconds',
+    'AI function call duration in seconds',
+    ['function', 'provider'],
+    buckets=[0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600]
+)
+
+# AI调用成本统计
+ai_cost_usd_total = Counter(
+    'ai_cost_usd_total',
+    'Total AI cost in USD',
+    ['function', 'provider']
+)
+
+# Fallback次数统计
+ai_fallback_total = Counter(
+    'ai_fallback_total',
+    'Total AI fallback occurrences',
+    ['function', 'from_provider', 'to_provider']
+)
+
+# 错误类型统计
+ai_error_total = Counter(
+    'ai_error_total',
+    'Total AI errors by type',
+    ['function', 'provider', 'error_type']
+)
+
+# Token使用统计
+ai_tokens_total = Counter(
+    'ai_tokens_total',
+    'Total tokens used',
+    ['function', 'provider', 'token_type']  # token_type: input/output
+)
+
+# 当前运行中的AI调用
+ai_calls_in_progress = Gauge(
+    'ai_calls_in_progress',
+    'Number of AI calls currently in progress',
+    ['function']
+)
 
 # ==================== 增强模式指标 ====================
 
