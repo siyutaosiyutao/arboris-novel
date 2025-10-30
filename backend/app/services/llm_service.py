@@ -120,6 +120,9 @@ class LLMService:
             )
 
             full_response = ""
+            finish_reason = None
+
+            # ✅ 修复：安全累积chunk内容，容错处理不同类型的chunk
             async for chunk in client.stream_chat(
                 messages=chat_messages,
                 model=endpoint_config["model"],
@@ -127,13 +130,30 @@ class LLMService:
                 timeout=timeout,
                 response_format=response_format,
             ):
-                full_response += chunk
+                # 处理不同类型的chunk
+                if isinstance(chunk, str):
+                    # Legacy string chunks
+                    full_response += chunk
+                elif isinstance(chunk, dict):
+                    # Structured chunks with metadata
+                    content = chunk.get("content", "")
+                    if content:
+                        full_response += content
+                    # 记录finish reason（如果有）
+                    if "finish_reason" in chunk:
+                        finish_reason = chunk["finish_reason"]
+                else:
+                    # 其他类型，尝试转换为字符串
+                    full_response += str(chunk)
 
             # 记录使用量
             if user_id:
                 await self.usage_service.increment_usage(user_id)
 
-            logger.info(f"{provider} API 调用成功，响应长度: {len(full_response)}")
+            logger.info(
+                f"{provider} API 调用成功，响应长度: {len(full_response)}, "
+                f"finish_reason: {finish_reason or 'N/A'}"
+            )
             return full_response
 
         except Exception as e:

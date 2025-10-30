@@ -7,7 +7,7 @@ AI功能到模型的映射配置
 
 from enum import Enum
 from typing import Dict, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AIFunctionType(str, Enum):
@@ -55,7 +55,7 @@ class FunctionRouteConfig(BaseModel):
     """功能路由配置"""
     function_type: AIFunctionType
     primary: ProviderConfig  # 主模型
-    fallbacks: List[ProviderConfig] = []  # 备用模型列表
+    fallbacks: List[ProviderConfig] = Field(default_factory=list)  # ✅ 修复：使用default_factory避免共享可变状态
     temperature: float = 0.7
     timeout: float = 300.0
     max_retries: int = 2

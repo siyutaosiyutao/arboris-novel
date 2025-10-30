@@ -216,19 +216,22 @@ class StoryMetricsService:
     ) -> int:
         """
         计算高潮评分（0-100）
-        
+
         基于：
         - 事件密度
         - 伏笔类型
         - 角色变化强度
         """
         score = 0
-        
+
         # 事件密度（最多40分）
         score += min(len(key_events) * 10, 40)
-        
+
         # 伏笔类型加权（最多30分）
+        # ✅ 修复：跳过非字典条目，避免运行时错误
         for f in foreshadowings:
+            if not isinstance(f, dict):
+                continue
             f_type = f.get("type", "")
             if f_type == "climax":
                 score += 15
@@ -238,12 +241,15 @@ class StoryMetricsService:
                 score += 10
             else:
                 score += 3
-        
+
         # 角色变化强度（最多30分）
+        # ✅ 修复：跳过非字典条目，避免运行时错误
         for change in char_changes:
+            if not isinstance(change, dict):
+                continue
             growth = change.get("growth_level", 0)
             score += min(growth * 3, 15)
-        
+
         return min(score, 100)
     
     @classmethod
