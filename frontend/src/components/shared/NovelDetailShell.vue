@@ -347,7 +347,9 @@ const sectionLoading = reactive<Record<SectionKey, boolean>>({
   characters: false,
   relationships: false,
   chapter_outline: false,
-  chapters: false
+  chapters: false,
+  auto_generator: false,
+  fanqie_upload: false
 })
 const sectionError = reactive<Record<SectionKey, string | null>>({
   overview: null,
@@ -355,7 +357,9 @@ const sectionError = reactive<Record<SectionKey, string | null>>({
   characters: null,
   relationships: null,
   chapter_outline: null,
-  chapters: null
+  chapters: null,
+  auto_generator: null,
+  fanqie_upload: null
 })
 
 const overviewMeta = reactive<{ title: string; updated_at: string | null }>({
@@ -540,6 +544,13 @@ const componentProps = computed(() => {
       return { chapters: data?.chapters || [], isAdmin: props.isAdmin }
     case 'auto_generator':
       return { projectId: projectId }
+    case 'fanqie_upload':
+      return {
+        projectId: projectId,
+        chapters: data?.chapters || [],
+        volumes: data?.volumes || [],
+        projectTitle: data?.project_title || ''
+      }
     default:
       return {}
   }

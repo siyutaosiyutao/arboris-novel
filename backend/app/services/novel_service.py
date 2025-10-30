@@ -732,6 +732,44 @@ class NovelService:
                 "project_id": project.id,
                 "available": True,
             }
+        elif section == NovelSectionType.FANQIE_UPLOAD:
+            # 番茄小说上传模块
+            # 返回章节列表供上传使用
+            chapters_map = {chapter.chapter_number: chapter for chapter in project.chapters}
+            volumes_map = {volume.id: volume for volume in project.volumes}
+
+            chapters_data = []
+            for chapter in sorted(project.chapters, key=lambda c: c.chapter_number):
+                volume_title = None
+                if chapter.volume_id and chapter.volume_id in volumes_map:
+                    volume_title = volumes_map[chapter.volume_id].title
+
+                chapters_data.append({
+                    "chapter_number": chapter.chapter_number,
+                    "volume_id": chapter.volume_id,
+                    "volume_title": volume_title,
+                    "word_count": chapter.word_count,
+                    "status": chapter.status,
+                    "has_content": chapter.selected_version_id is not None,
+                })
+
+            volumes_data = [
+                {
+                    "id": volume.id,
+                    "volume_number": volume.volume_number,
+                    "title": volume.title,
+                    "description": volume.description,
+                }
+                for volume in sorted(project.volumes, key=lambda v: v.volume_number)
+            ]
+
+            data = {
+                "project_id": project.id,
+                "project_title": project.title,
+                "chapters": chapters_data,
+                "volumes": volumes_data,
+                "total_chapters": len(chapters_data),
+            }
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未知的章节类型")
 

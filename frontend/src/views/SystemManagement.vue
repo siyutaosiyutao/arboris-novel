@@ -110,40 +110,75 @@ const tabs = [
 
 <style scoped>
 .system-management {
-  @apply min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/40;
+  min-height: 100vh;
+  background: linear-gradient(to bottom right, rgb(248 250 252), rgb(239 246 255 / 0.3), rgb(238 242 255 / 0.4));
 }
 
 .header {
-  @apply border-b border-slate-200 pb-6;
+  border-bottom: 1px solid rgb(226 232 240);
+  padding-bottom: 1.5rem;
 }
 
 .tabs-container {
-  @apply bg-white rounded-lg shadow-sm border border-slate-200 p-2 mb-6;
+  background-color: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  border: 1px solid rgb(226 232 240);
+  padding: 0.5rem;
+  margin-bottom: 1.5rem;
 }
 
 .tabs {
-  @apply flex gap-2 overflow-x-auto;
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
 }
 
 .tab {
-  @apply flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap;
-  @apply text-slate-600 hover:text-slate-900 hover:bg-slate-50;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  white-space: nowrap;
+  color: rgb(71 85 105);
+}
+
+.tab:hover {
+  color: rgb(15 23 42);
+  background-color: rgb(248 250 252);
 }
 
 .tab-active {
-  @apply bg-gradient-to-r from-indigo-50 to-indigo-100/80 text-indigo-700 shadow-sm ring-1 ring-indigo-200/50;
+  background: linear-gradient(to right, rgb(238 242 255), rgb(224 231 255 / 0.8));
+  color: rgb(67 56 202);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  outline: 1px solid rgb(199 210 254 / 0.5);
 }
 
 .badge {
-  @apply ml-auto px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 rounded-full;
+  margin-left: auto;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background-color: rgb(254 226 226);
+  color: rgb(185 28 28);
+  border-radius: 9999px;
 }
 
 .tab-content {
-  @apply bg-white rounded-lg shadow-sm border border-slate-200 p-6;
+  background-color: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  border: 1px solid rgb(226 232 240);
+  padding: 1.5rem;
 }
 
 .content-panel {
-  @apply min-h-[600px];
+  min-height: 600px;
 }
 </style>
 

@@ -214,30 +214,44 @@
   </div>
 </template>
 
-<script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '@/api/base'
 
+interface AutoGeneratorTask {
+  id: number
+  status: string
+  chapters_generated: number
+  target_chapters: number | null
+  error_count: number
+  last_generation_at: string | null
+  last_error: string | null
+}
+
+interface AutoGeneratorLog {
+  id: number
+  log_type: string
+  message: string
+  created_at: string
+}
+
 // 接受 props
-const props = defineProps({
-  projectId: {
-    type: String,
-    required: false
-  }
-})
+const props = defineProps<{
+  projectId?: string
+}>()
 
 const route = useRoute()
 // 优先使用 props，否则从路由获取
-const projectId = props.projectId || route.params.id
+const projectId = props.projectId || (route.params.id as string)
 
 const loading = ref(false)
-const currentTask = ref(null)
-const logs = ref([])
-const refreshInterval = ref(null)
+const currentTask: Ref<AutoGeneratorTask | null> = ref(null)
+const logs: Ref<AutoGeneratorLog[]> = ref([])
+const refreshInterval: Ref<number | null> = ref(null)
 
 const form = ref({
-  targetChapters: null,
+  targetChapters: null as number | null,
   intervalSeconds: 60,
   autoSelectVersion: true,
   versionCount: 1,
@@ -268,7 +282,7 @@ const createTask = async () => {
 
     // 自动启动
     await startTask()
-  } catch (error) {
+  } catch (error: any) {
     alert('创建任务失败: ' + (error.message || '未知错误'))
   } finally {
     loading.value = false
@@ -284,7 +298,7 @@ const startTask = async () => {
     currentTask.value = task
     await refreshLogs()
     startAutoRefresh()
-  } catch (error) {
+  } catch (error: any) {
     alert('启动任务失败: ' + (error.message || '未知错误'))
   } finally {
     loading.value = false
@@ -299,7 +313,7 @@ const pauseTask = async () => {
     const task = await api.post(`/api/auto-generator/tasks/${currentTask.value.id}/pause`)
     currentTask.value = task
     stopAutoRefresh()
-  } catch (error) {
+  } catch (error: any) {
     alert('暂停任务失败: ' + (error.message || '未知错误'))
   } finally {
     loading.value = false
@@ -316,7 +330,7 @@ const stopTask = async () => {
     const task = await api.post(`/api/auto-generator/tasks/${currentTask.value.id}/stop`)
     currentTask.value = task
     stopAutoRefresh()
-  } catch (error) {
+  } catch (error: any) {
     alert('停止任务失败: ' + (error.message || '未知错误'))
   } finally {
     loading.value = false
@@ -350,7 +364,7 @@ const startAutoRefresh = () => {
   refreshInterval.value = setInterval(() => {
     refreshStatus()
     refreshLogs()
-  }, 5000) // 每5秒刷新一次
+  }, 5000) as unknown as number // 每5秒刷新一次
 }
 
 const stopAutoRefresh = () => {
@@ -360,8 +374,8 @@ const stopAutoRefresh = () => {
   }
 }
 
-const getStatusText = (status) => {
-  const statusMap = {
+const getStatusText = (status: string) => {
+  const statusMap: Record<string, string> = {
     pending: '等待中',
     running: '运行中',
     paused: '已暂停',
@@ -372,7 +386,7 @@ const getStatusText = (status) => {
   return statusMap[status] || status
 }
 
-const formatTime = (time) => {
+const formatTime = (time: string | null) => {
   if (!time) return '-'
   return new Date(time).toLocaleString('zh-CN')
 }

@@ -138,6 +138,7 @@ class NovelSectionType(str, Enum):
     CHAPTER_OUTLINE = "chapter_outline"
     CHAPTERS = "chapters"
     AUTO_GENERATOR = "auto_generator"
+    FANQIE_UPLOAD = "fanqie_upload"
 
 
 class NovelSectionResponse(BaseModel):
