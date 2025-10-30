@@ -20,6 +20,7 @@ from .user import User
 from .user_daily_request import UserDailyRequest
 from .system_config import SystemConfig
 from .auto_generator import AutoGeneratorTask, AutoGeneratorLog
+from .async_task import PendingAnalysis, AnalysisNotification
 
 __all__ = [
     "AdminSetting",
@@ -41,4 +42,6 @@ __all__ = [
     "SystemConfig",
     "AutoGeneratorTask",
     "AutoGeneratorLog",
+    "PendingAnalysis",
+    "AnalysisNotification",
 ]

@@ -211,6 +211,9 @@ class Chapter(Base):
     evaluations: Mapped[list["ChapterEvaluation"]] = relationship(
         back_populates="chapter", cascade="all, delete-orphan", order_by="ChapterEvaluation.created_at"
     )
+    pending_analyses: Mapped[list["PendingAnalysis"]] = relationship(
+        back_populates="chapter", cascade="all, delete-orphan"
+    )
 
 
 class ChapterVersion(Base):
