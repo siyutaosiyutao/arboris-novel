@@ -306,7 +306,7 @@ export const novelApi = {
     volume_count?: number
     chapter_count?: number
   }> {
-    return request(`${WRITER_BASE}/${projectId}/upload-to-fanqie`, {
+    return request(`${NOVELS_BASE}/${projectId}/upload-to-fanqie`, {
       method: 'POST',
       body: JSON.stringify({
         account,
@@ -324,7 +324,7 @@ export const novelApi = {
     account?: string
     message?: string
   }> {
-    return request(`${WRITER_BASE}/fanqie/login`, {
+    return request(`${NOVELS_BASE}/fanqie/login`, {
       method: 'POST',
       body: JSON.stringify({
         account,

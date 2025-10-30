@@ -177,18 +177,17 @@ class FanqiePublisherService:
             book_cards = await self.page.query_selector_all('[id^="long-article-table-item-"]')
 
             for card in book_cards:
-                # 获取书名
-                title_elem = await card.query_selector('text')
-                if title_elem:
-                    title_text = await title_elem.text_content()
-                    if book_name in title_text or title_text in book_name:
-                        # 从卡片ID中提取book_id
-                        card_id = await card.get_attribute('id')
-                        if card_id:
-                            book_id = card_id.replace('long-article-table-item-', '')
-                            logger.info(f"找到书籍: {title_text}, ID: {book_id}")
-                            self.book_id = book_id
-                            return book_id
+                # 获取书名 - 使用 inner_text() 而不是 query_selector('text')
+                # Playwright 的 'text' 选择器用于查找包含特定文本的元素，不是获取文本内容
+                card_text = await card.inner_text()
+                if card_text and (book_name in card_text or card_text.strip() == book_name):
+                    # 从卡片ID中提取book_id
+                    card_id = await card.get_attribute('id')
+                    if card_id:
+                        book_id = card_id.replace('long-article-table-item-', '')
+                        logger.info(f"找到书籍: {card_text.strip()}, ID: {book_id}")
+                        self.book_id = book_id
+                        return book_id
 
             logger.warning(f"未找到书籍: {book_name}")
             return None
@@ -646,7 +645,7 @@ class FanqiePublisherService:
                 return {
                     "success": False,
                     "error": f"Cookie加载失败，请先调用 /api/novels/fanqie/login 接口手动登录并保存Cookie（账号标识: {account}）",
-                    "hint": "Cookie文件路径: storage/fanqie_cookies/{account}_cookies.json"
+                    "hint": f"Cookie文件路径: storage/fanqie_cookies/{account}_cookies.json"
                 }
 
             # 验证Cookie是否有效（尝试访问作家专区）

@@ -335,47 +335,6 @@ class LLMService:
             detail=f"所有 AI 服务端点均不可用，请稍后重试。最后错误: {str(last_error)}"
         ) from last_error
 
-        logger.debug(
-            "LLM response collected: model=%s user_id=%s finish_reason=%s preview=%s",
-            config.get("model"),
-            user_id,
-            finish_reason,
-            full_response[:500],
-        )
-
-        if finish_reason == "length":
-            logger.warning(
-                "LLM response truncated: model=%s user_id=%s response_length=%d",
-                config.get("model"),
-                user_id,
-                len(full_response),
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"AI 响应因长度限制被截断（已生成 {len(full_response)} 字符），请缩短输入内容或调整模型参数"
-            )
-
-        if not full_response:
-            logger.error(
-                "LLM returned empty response: model=%s user_id=%s finish_reason=%s",
-                config.get("model"),
-                user_id,
-                finish_reason,
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"AI 未返回有效内容（结束原因: {finish_reason or '未知'}），请稍后重试或联系管理员"
-            )
-
-        await self.usage_service.increment("api_request_count")
-        logger.info(
-            "LLM response success: model=%s user_id=%s chars=%d",
-            config.get("model"),
-            user_id,
-            len(full_response),
-        )
-        return full_response
-
     async def _resolve_llm_config(self, user_id: Optional[int]) -> List[Dict[str, Optional[str]]]:
         """解析 LLM 配置，返回端点列表
 
@@ -445,6 +404,16 @@ class LLMService:
             client = OllamaAsyncClient(host=base_url)
             try:
                 response = await client.embeddings(model=target_model, prompt=text)
+                embedding: Optional[List[float]]
+                if isinstance(response, dict):
+                    embedding = response.get("embedding")
+                else:
+                    embedding = getattr(response, "embedding", None)
+                if not embedding:
+                    logger.warning("Ollama 返回空向量: model=%s", target_model)
+                    return []
+                if not isinstance(embedding, list):
+                    embedding = list(embedding)
             except Exception as exc:  # pragma: no cover - 本地服务调用失败
                 logger.error(
                     "Ollama 嵌入请求失败: model=%s base_url=%s error=%s",
@@ -454,16 +423,13 @@ class LLMService:
                     exc_info=True,
                 )
                 return []
-            embedding: Optional[List[float]]
-            if isinstance(response, dict):
-                embedding = response.get("embedding")
-            else:
-                embedding = getattr(response, "embedding", None)
-            if not embedding:
-                logger.warning("Ollama 返回空向量: model=%s", target_model)
-                return []
-            if not isinstance(embedding, list):
-                embedding = list(embedding)
+            finally:
+                # 关闭客户端连接，避免资源泄漏
+                if hasattr(client, 'close'):
+                    try:
+                        await client.close()
+                    except Exception:
+                        pass  # 忽略关闭时的错误
         else:
             config = await self._resolve_llm_config(user_id)
             api_key = await self._get_config_value("embedding.api_key") or config["api_key"]
@@ -474,6 +440,10 @@ class LLMService:
                     input=text,
                     model=target_model,
                 )
+                if not response.data:
+                    logger.warning("OpenAI 嵌入请求返回空数据: model=%s user_id=%s", target_model, user_id)
+                    return []
+                embedding = response.data[0].embedding
             except Exception as exc:  # pragma: no cover - 网络或鉴权失败
                 logger.error(
                     "OpenAI 嵌入请求失败: model=%s base_url=%s user_id=%s error=%s",
@@ -484,10 +454,9 @@ class LLMService:
                     exc_info=True,
                 )
                 return []
-            if not response.data:
-                logger.warning("OpenAI 嵌入请求返回空数据: model=%s user_id=%s", target_model, user_id)
-                return []
-            embedding = response.data[0].embedding
+            finally:
+                # 关闭客户端连接，避免资源泄漏
+                await client.close()
 
         if not isinstance(embedding, list):
             embedding = list(embedding)
