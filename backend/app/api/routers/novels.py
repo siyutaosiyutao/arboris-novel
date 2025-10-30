@@ -381,6 +381,7 @@ async def upload_to_fanqie(
 async def fanqie_manual_login(
     account: str = Body("default", description="账号标识"),
     wait_seconds: int = Body(60, description="等待登录的时间（秒）"),
+    current_user: UserInDB = Depends(get_current_user),
 ) -> Dict:
     """手动登录番茄小说并保存Cookie
 
@@ -396,7 +397,7 @@ async def fanqie_manual_login(
     """
     from ...services.fanqie_publisher_service import FanqiePublisherService
 
-    logger.info(f"开始番茄小说手动登录流程，账号标识: {account}")
+    logger.info(f"用户 {current_user.id} 开始番茄小说手动登录流程，账号标识: {account}")
 
     async with FanqiePublisherService() as publisher:
         result = await publisher.manual_login_and_save_cookies(

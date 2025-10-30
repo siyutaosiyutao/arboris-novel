@@ -222,21 +222,21 @@ class FanqiePublisherService:
             await asyncio.sleep(1)
 
             # 2. 找到目标分卷并点击编辑图标
-            # 使用JavaScript查找并点击编辑图标
-            edit_result = await self.page.evaluate(f'''() => {{
+            # 使用JavaScript查找并点击编辑图标（使用参数传递避免注入）
+            edit_result = await self.page.evaluate('''(oldName) => {
                 const volumeItems = document.querySelectorAll('.chapter-volume-list-item-normal');
-                for (const item of volumeItems) {{
+                for (const item of volumeItems) {
                     const nameSpan = item.querySelector('span');
-                    if (nameSpan && nameSpan.textContent.includes('{old_name}')) {{
+                    if (nameSpan && nameSpan.textContent.includes(oldName)) {
                         const editIcon = item.querySelector('.tomato-edit');
-                        if (editIcon) {{
+                        if (editIcon) {
                             editIcon.click();
                             return true;
-                        }}
-                    }}
-                }}
+                        }
+                    }
+                }
                 return false;
-            }}''')
+            }''', old_name)
 
             if not edit_result:
                 logger.error(f"未找到分卷: {old_name}")
@@ -404,17 +404,17 @@ class FanqiePublisherService:
 
                 # 将内容按段落分割并插入
                 paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
-                await self.page.evaluate(f'''(paragraphs) => {{
+                await self.page.evaluate('''(paragraphs) => {
                     const editor = document.querySelector('.ProseMirror');
-                    if (editor) {{
-                        paragraphs.forEach(para => {{
+                    if (editor) {
+                        paragraphs.forEach(para => {
                             const p = document.createElement('p');
                             p.textContent = para;
                             editor.appendChild(p);
-                        }});
-                        editor.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    }}
-                }}''', paragraphs)
+                        });
+                        editor.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                }''', paragraphs)
 
                 logger.info(f"填写内容: {len(content)}字, {len(paragraphs)}段")
                 await asyncio.sleep(2)  # 等待自动保存
@@ -435,8 +435,10 @@ class FanqiePublisherService:
                 if confirm_btn:
                     await confirm_btn.click()
                     await asyncio.sleep(2)
-            except:
+            except PlaywrightTimeoutError:
                 logger.info("未出现风险检测对话框")
+            except Exception as e:
+                logger.warning(f"处理风险检测对话框时出错: {e}")
 
             # 9. 等待发布设置对话框出现
             await asyncio.sleep(1)
@@ -695,8 +697,10 @@ class FanqiePublisherService:
                 # 等待跳转到作家专区
                 await self.page.wait_for_url("**/writer/zone/**", timeout=wait_seconds * 1000)
                 logger.info("检测到登录成功")
-            except:
+            except PlaywrightTimeoutError:
                 logger.warning("未检测到登录成功，但仍会尝试保存Cookie")
+            except Exception as e:
+                logger.warning(f"等待登录时出错: {e}，但仍会尝试保存Cookie")
 
             # 保存Cookie
             save_success = await self.save_cookies(account)
