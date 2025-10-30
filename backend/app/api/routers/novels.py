@@ -332,3 +332,81 @@ async def patch_blueprint(
     await novel_service.patch_blueprint(project_id, update_data)
     logger.info("项目 %s 局部更新蓝图字段：%s", project_id, list(update_data.keys()))
     return await novel_service.get_project_schema(project_id, current_user.id)
+
+
+@router.post("/{project_id}/upload-to-fanqie")
+async def upload_to_fanqie(
+    project_id: str,
+    account: str = Body("default", description="番茄小说账号标识"),
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> Dict:
+    """一键上传小说到番茄小说平台
+
+    前提条件：
+    1. 已在番茄小说平台手动创建同名书籍
+    2. 已通过 /api/novels/fanqie/login 保存过Cookie
+
+    Args:
+        project_id: 小说项目ID
+        account: 番茄小说账号标识（用于区分不同账号的cookie）
+
+    Returns:
+        上传结果，包含成功/失败状态和详细信息
+    """
+    from ...services.fanqie_publisher_service import FanqiePublisherService
+
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    logger.info(f"用户 {current_user.id} 开始上传项目 {project_id} 到番茄小说")
+
+    # 使用异步上下文管理器
+    async with FanqiePublisherService() as publisher:
+        result = await publisher.upload_novel_to_fanqie(
+            db=session,
+            project_id=project_id,
+            account=account
+        )
+
+    if result.get("success"):
+        logger.info(f"项目 {project_id} 上传成功: {result.get('chapter_count')}章")
+    else:
+        logger.error(f"项目 {project_id} 上传失败: {result.get('error')}")
+
+    return result
+
+
+@router.post("/fanqie/login")
+async def fanqie_manual_login(
+    account: str = Body("default", description="账号标识"),
+    wait_seconds: int = Body(60, description="等待登录的时间（秒）"),
+) -> Dict:
+    """手动登录番茄小说并保存Cookie
+
+    此接口会打开浏览器窗口，用户需要手动完成登录。
+    登录成功后，Cookie会自动保存，供后续上传使用。
+
+    Args:
+        account: 账号标识（用于区分不同账号的cookie）
+        wait_seconds: 等待用户登录的时间（秒）
+
+    Returns:
+        登录结果
+    """
+    from ...services.fanqie_publisher_service import FanqiePublisherService
+
+    logger.info(f"开始番茄小说手动登录流程，账号标识: {account}")
+
+    async with FanqiePublisherService() as publisher:
+        result = await publisher.manual_login_and_save_cookies(
+            account=account,
+            wait_seconds=wait_seconds
+        )
+
+    if result.get("success"):
+        logger.info(f"番茄小说登录成功，账号标识: {account}")
+    else:
+        logger.error(f"番茄小说登录失败: {result.get('error')}")
+
+    return result
