@@ -12,6 +12,7 @@ from .novel import (
     NovelBlueprint,
     NovelConversation,
     NovelProject,
+    Volume,
 )
 from .prompt import Prompt
 from .update_log import UpdateLog
@@ -35,6 +36,7 @@ __all__ = [
     "ChapterVersion",
     "ChapterEvaluation",
     "NovelProject",
+    "Volume",
     "Prompt",
     "UpdateLog",
     "UsageMetric",
@@ -45,5 +47,5 @@ __all__ = [
     "AutoGeneratorLog",
     "PendingAnalysis",
     "AnalysisNotification",
-    "ChapterStoryMetrics",  # ✅ 修复3：导出新模型
+    "ChapterStoryMetrics",
 ]

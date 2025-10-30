@@ -24,7 +24,7 @@ class AIProvider(Base):
     rate_limit_per_minute = Column(Integer, default=60)
     timeout_seconds = Column(Integer, default=300)
     cost_per_1k_tokens = Column(DECIMAL(10, 6))
-    metadata = Column(Text)
+    provider_metadata = Column(Text)  # 重命名避免与SQLAlchemy保留字冲突
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -108,11 +108,11 @@ class AIFunctionCallLog(Base):
     # 错误信息
     error_type = Column(String(100))
     error_message = Column(Text)
-    
+
     # 元数据
     finish_reason = Column(String(50))
-    metadata = Column(Text)
-    
+    call_metadata = Column(Text)  # 重命名避免与SQLAlchemy保留字冲突
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # 关系

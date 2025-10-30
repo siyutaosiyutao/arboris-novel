@@ -136,7 +136,7 @@ export interface DeleteNovelsResponse {
   message: string
 }
 
-export type NovelSectionType = 'overview' | 'world_setting' | 'characters' | 'relationships' | 'chapter_outline' | 'chapters' | 'auto_generator'
+export type NovelSectionType = 'overview' | 'world_setting' | 'characters' | 'relationships' | 'chapter_outline' | 'chapters' | 'auto_generator' | 'fanqie_upload'
 
 export interface NovelSectionResponse {
   section: NovelSectionType
@@ -287,6 +287,151 @@ export class NovelAPI {
         chapter_number: chapterNumber,
         content: content
       })
+    })
+  }
+}
+
+// 番茄小说上传 API
+export const novelApi = {
+  async uploadToFanqie(
+    projectId: string,
+    account: string = 'default',
+    headless: boolean = true
+  ): Promise<{
+    success: boolean
+    error?: string
+    hint?: string
+    book_id?: string
+    book_name?: string
+    volume_count?: number
+    chapter_count?: number
+  }> {
+    return request(`${WRITER_BASE}/${projectId}/upload-to-fanqie`, {
+      method: 'POST',
+      body: JSON.stringify({
+        account,
+        headless
+      })
+    })
+  },
+
+  async fanqieLogin(
+    account: string = 'default',
+    waitSeconds: number = 60
+  ): Promise<{
+    success: boolean
+    error?: string
+    account?: string
+    message?: string
+  }> {
+    return request(`${WRITER_BASE}/fanqie/login`, {
+      method: 'POST',
+      body: JSON.stringify({
+        account,
+        wait_seconds: waitSeconds
+      })
+    })
+  }
+}
+
+// AI 配置管理 API
+export const aiConfigApi = {
+  // 获取所有 AI 供应商
+  async getProviders(): Promise<any[]> {
+    return request(`${API_BASE_URL}${API_PREFIX}/ai/providers`)
+  },
+
+  // 添加 AI 供应商
+  async addProvider(provider: any): Promise<any> {
+    return request(`${API_BASE_URL}${API_PREFIX}/ai/providers`, {
+      method: 'POST',
+      body: JSON.stringify(provider)
+    })
+  },
+
+  // 更新 AI 供应商
+  async updateProvider(providerId: string, provider: any): Promise<any> {
+    return request(`${API_BASE_URL}${API_PREFIX}/ai/providers/${providerId}`, {
+      method: 'PUT',
+      body: JSON.stringify(provider)
+    })
+  },
+
+  // 删除 AI 供应商
+  async deleteProvider(providerId: string): Promise<void> {
+    return request(`${API_BASE_URL}${API_PREFIX}/ai/providers/${providerId}`, {
+      method: 'DELETE'
+    })
+  },
+
+  // 获取 AI 功能配置
+  async getFunctionConfigs(): Promise<any[]> {
+    return request(`${API_BASE_URL}${API_PREFIX}/ai/function-configs`)
+  },
+
+  // 更新 AI 功能配置
+  async updateFunctionConfig(functionName: string, config: any): Promise<any> {
+    return request(`${API_BASE_URL}${API_PREFIX}/ai/function-configs/${functionName}`, {
+      method: 'PUT',
+      body: JSON.stringify(config)
+    })
+  },
+
+  // 获取 AI 调用统计
+  async getCallStats(startDate?: string, endDate?: string): Promise<any> {
+    const params = new URLSearchParams()
+    if (startDate) params.append('start_date', startDate)
+    if (endDate) params.append('end_date', endDate)
+    return request(`${API_BASE_URL}${API_PREFIX}/ai/stats?${params}`)
+  }
+}
+
+// 异步分析任务 API
+export const asyncAnalysisApi = {
+  // 获取任务列表
+  async getTasks(status?: string): Promise<any[]> {
+    const params = status ? `?status=${status}` : ''
+    return request(`${API_BASE_URL}${API_PREFIX}/async-analysis/tasks${params}`)
+  },
+
+  // 获取任务详情
+  async getTask(taskId: string): Promise<any> {
+    return request(`${API_BASE_URL}${API_PREFIX}/async-analysis/tasks/${taskId}`)
+  },
+
+  // 取消任务
+  async cancelTask(taskId: string): Promise<void> {
+    return request(`${API_BASE_URL}${API_PREFIX}/async-analysis/tasks/${taskId}/cancel`, {
+      method: 'POST'
+    })
+  }
+}
+
+// 分卷管理 API
+export const volumeApi = {
+  // 获取剧情指标
+  async getStoryMetrics(projectId: string): Promise<any[]> {
+    return request(`${API_BASE_URL}${API_PREFIX}/novels/${projectId}/story-metrics`)
+  },
+
+  // 触发自动分卷
+  async triggerAutoSplit(projectId: string, threshold?: number): Promise<any> {
+    return request(`${API_BASE_URL}${API_PREFIX}/novels/${projectId}/auto-split`, {
+      method: 'POST',
+      body: JSON.stringify({ threshold })
+    })
+  },
+
+  // 获取分卷配置
+  async getSplitConfig(projectId: string): Promise<any> {
+    return request(`${API_BASE_URL}${API_PREFIX}/novels/${projectId}/split-config`)
+  },
+
+  // 更新分卷配置
+  async updateSplitConfig(projectId: string, config: any): Promise<any> {
+    return request(`${API_BASE_URL}${API_PREFIX}/novels/${projectId}/split-config`, {
+      method: 'PUT',
+      body: JSON.stringify(config)
     })
   }
 }

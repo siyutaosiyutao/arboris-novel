@@ -7,7 +7,7 @@ import json
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, Field, validator
 from sqlalchemy import update as sql_update, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -143,6 +143,7 @@ async def get_route(
 @router.get("/logs", response_model=List[AICallLogSchema])
 @limiter.limit("30/minute")  # ✅ 每分钟最多30次
 async def list_logs(
+    request: Request,
     function_type: Optional[str] = None,
     limit: int = 100,
     session: AsyncSession = Depends(get_session),
@@ -209,6 +210,7 @@ class UpdateRouteRequest(BaseModel):
 @router.patch("/routes/{function_type}")
 @limiter.limit("10/minute")  # ✅ 配置更新限流更严格
 async def update_route(
+    http_request: Request,
     function_type: str,
     request: UpdateRouteRequest,
     session: AsyncSession = Depends(get_session),

@@ -255,6 +255,7 @@ import RelationshipsSection from '@/components/novel-detail/RelationshipsSection
 import ChapterOutlineSection from '@/components/novel-detail/ChapterOutlineSection.vue'
 import ChaptersSection from '@/components/novel-detail/ChaptersSection.vue'
 import AutoGenerator from '@/components/AutoGenerator.vue'
+import FanqieUploader from '@/components/FanqieUploader.vue'
 
 interface Props {
   isAdmin?: boolean
@@ -280,7 +281,8 @@ const sections: Array<{ key: SectionKey; label: string; description: string }> =
   { key: 'relationships', label: '人物关系', description: '角色之间的联系' },
   { key: 'chapter_outline', label: '章节大纲', description: props.isAdmin ? '故事章节规划' : '故事结构规划' },
   { key: 'chapters', label: '章节内容', description: props.isAdmin ? '生成章节与正文' : '生成状态与摘要' },
-  { key: 'auto_generator', label: '自动生成器', description: '批量生成章节内容' }
+  { key: 'auto_generator', label: '自动生成器', description: '批量生成章节内容' },
+  { key: 'fanqie_upload', label: '番茄小说', description: '一键上传到番茄小说' }
 ]
 
 const sectionComponents: Record<SectionKey, any> = {
@@ -290,7 +292,8 @@ const sectionComponents: Record<SectionKey, any> = {
   characters: CharactersSection,
   relationships: RelationshipsSection,
   chapter_outline: ChapterOutlineSection,
-  chapters: ChaptersSection
+  chapters: ChaptersSection,
+  fanqie_upload: FanqieUploader
 }
 
 // Section icons as functional components
@@ -326,6 +329,12 @@ const getSectionIcon = (key: SectionKey) => {
     chapters: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
       h('path', { d: 'M4 19.5A2.5 2.5 0 016.5 17H20' }),
       h('path', { d: 'M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z' })
+    ]),
+    fanqie_upload: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
+      h('path', { d: 'M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12' })
+    ]),
+    auto_generator: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
+      h('path', { d: 'M13 10V3L4 14h7v7l9-11h-7z' })
     ])
   }
   return icons[key]
