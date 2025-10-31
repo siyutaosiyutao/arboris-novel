@@ -3,7 +3,7 @@ import router from '@/router'
 
 // API 配置
 // @ts-ignore - Vite 环境变量
-export const API_BASE_URL = import.meta.env.MODE === 'production' ? '' : 'http://127.0.0.1:8001'
+export const API_BASE_URL = import.meta.env.MODE === 'production' ? '' : 'http://127.0.0.1:8000'
 
 // 统一的 API 请求类
 class APIClient {

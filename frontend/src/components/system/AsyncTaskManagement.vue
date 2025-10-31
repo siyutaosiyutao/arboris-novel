@@ -148,7 +148,7 @@ const closeModal = () => {
 }
 
 // ✅ 修复：保存定时器引用，防止内存泄漏
-let refreshTimer: number | null = null
+let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   loadTasks()

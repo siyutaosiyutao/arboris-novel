@@ -232,10 +232,13 @@ const restoreConversation = async (projectId: string) => {
       const lastAssistantMsgStr = project.conversation_history.filter(m => m.role === 'assistant').pop()?.content
       if (lastAssistantMsgStr) {
         const lastAssistantMsg = JSON.parse(lastAssistantMsgStr)
-        
+
         if (lastAssistantMsg.is_complete) {
           // 如果对话已完成，直接显示蓝图确认界面
-          confirmationMessage.value = lastAssistantMsg.ai_message
+          // ✅ 修复：确保 ai_message 是字符串，避免显示 [object Object]
+          confirmationMessage.value = typeof lastAssistantMsg.ai_message === 'string'
+            ? lastAssistantMsg.ai_message
+            : JSON.stringify(lastAssistantMsg.ai_message)
           showBlueprintConfirmation.value = true
         } else {
           // 否则，恢复对话
@@ -282,7 +285,10 @@ const handleUserInput = async (userInput: any) => {
 
     if (response.is_complete && response.ready_for_blueprint) {
       // 对话完成，显示蓝图确认界面
-      confirmationMessage.value = response.ai_message
+      // ✅ 修复：确保 ai_message 是字符串，避免显示 [object Object]
+      confirmationMessage.value = typeof response.ai_message === 'string'
+        ? response.ai_message
+        : JSON.stringify(response.ai_message)
       showBlueprintConfirmation.value = true
     } else if (response.is_complete) {
       // 向后兼容：直接生成蓝图（如果后端还没更新）
@@ -316,7 +322,10 @@ const handleGenerateBlueprint = async () => {
 const handleBlueprintGenerated = (response: any) => {
   console.log('收到蓝图生成完成事件:', response)
   completedBlueprint.value = response.blueprint
-  blueprintMessage.value = response.ai_message
+  // ✅ 修复：确保 ai_message 是字符串，避免显示 [object Object]
+  blueprintMessage.value = typeof response.ai_message === 'string'
+    ? response.ai_message
+    : JSON.stringify(response.ai_message)
   showBlueprintConfirmation.value = false
   showBlueprint.value = true
 }

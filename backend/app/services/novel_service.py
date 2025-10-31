@@ -605,57 +605,67 @@ class NovelService:
 
     def _build_blueprint_schema(self, project: NovelProject) -> Blueprint:
         blueprint_obj = project.blueprint
-        if blueprint_obj:
-            return Blueprint(
-                title=blueprint_obj.title or "",
-                target_audience=blueprint_obj.target_audience or "",
-                genre=blueprint_obj.genre or "",
-                style=blueprint_obj.style or "",
-                tone=blueprint_obj.tone or "",
-                one_sentence_summary=blueprint_obj.one_sentence_summary or "",
-                full_synopsis=blueprint_obj.full_synopsis or "",
-                world_setting=blueprint_obj.world_setting or {},
-                characters=[
-                    {
-                        "name": character.name,
-                        "identity": character.identity,
-                        "personality": character.personality,
-                        "goals": character.goals,
-                        "abilities": character.abilities,
-                        "relationship_to_protagonist": character.relationship_to_protagonist,
-                        **(character.extra or {}),
-                    }
-                    for character in sorted(project.characters, key=lambda c: c.position)
-                ],
-                relationships=[
-                    {
-                        "character_from": relation.character_from,
-                        "character_to": relation.character_to,
-                        "description": relation.description or "",
-                        "relationship_type": getattr(relation, "relationship_type", None),
-                    }
-                    for relation in sorted(project.relationships_, key=lambda r: r.position)
-                ],
-                volumes=[
-                    VolumeSchema(
-                        id=volume.id,
-                        volume_number=volume.volume_number,
-                        title=volume.title,
-                        description=volume.description,
-                    )
-                    for volume in sorted(project.volumes, key=lambda v: v.volume_number)
-                ],
-                chapter_outline=[
-                    ChapterOutlineSchema(
-                        chapter_number=outline.chapter_number,
-                        title=outline.title,
-                        summary=outline.summary or "",
-                        volume_id=outline.volume_id,
-                        volume_number=outline.volume.volume_number if outline.volume else None,
-                    )
-                    for outline in sorted(project.outlines, key=lambda o: o.chapter_number)
-                ],
-            )
+        if blueprint_obj is not None:
+            # ✅ 修复：添加防御性检查,确保blueprint_obj的属性访问安全
+            try:
+                return Blueprint(
+                    title=getattr(blueprint_obj, 'title', None) or "",
+                    target_audience=getattr(blueprint_obj, 'target_audience', None) or "",
+                    genre=getattr(blueprint_obj, 'genre', None) or "",
+                    style=getattr(blueprint_obj, 'style', None) or "",
+                    tone=getattr(blueprint_obj, 'tone', None) or "",
+                    one_sentence_summary=getattr(blueprint_obj, 'one_sentence_summary', None) or "",
+                    full_synopsis=getattr(blueprint_obj, 'full_synopsis', None) or "",
+                    world_setting=getattr(blueprint_obj, 'world_setting', None) or {},
+                    characters=[
+                        {
+                            "name": character.name,
+                            "identity": character.identity,
+                            "personality": character.personality,
+                            "goals": character.goals,
+                            "abilities": character.abilities,
+                            "relationship_to_protagonist": character.relationship_to_protagonist,
+                            **(character.extra or {}),
+                        }
+                        for character in sorted(project.characters, key=lambda c: c.position)
+                    ],
+                    relationships=[
+                        {
+                            "character_from": relation.character_from,
+                            "character_to": relation.character_to,
+                            "description": relation.description or "",
+                            "relationship_type": getattr(relation, "relationship_type", None),
+                        }
+                        for relation in sorted(project.relationships_, key=lambda r: r.position)
+                    ],
+                    volumes=[
+                        VolumeSchema(
+                            id=volume.id,
+                            volume_number=volume.volume_number,
+                            title=volume.title,
+                            description=volume.description,
+                        )
+                        for volume in sorted(project.volumes, key=lambda v: v.volume_number)
+                    ],
+                    chapter_outline=[
+                        ChapterOutlineSchema(
+                            chapter_number=outline.chapter_number,
+                            title=getattr(outline, 'title', None) or f"第{outline.chapter_number}章",
+                            summary=getattr(outline, 'summary', None) or "",
+                            volume_id=outline.volume_id,
+                            volume_number=next((v.volume_number for v in project.volumes if v.id == outline.volume_id), None),
+                        )
+                        for outline in sorted(project.outlines, key=lambda o: o.chapter_number)
+                    ],
+                )
+            except AttributeError as e:
+                # 如果访问属性时出错,记录日志并返回空blueprint
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"构建blueprint schema时出错: {e}, blueprint_obj={blueprint_obj}")
+                # 返回空blueprint
+                pass
+
         return Blueprint(
             title="",
             target_audience="",

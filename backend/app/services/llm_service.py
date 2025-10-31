@@ -87,8 +87,19 @@ class LLMService:
         base_url = get_provider_base_url(provider)
         env_key = get_provider_env_key(provider)
 
-        # ✅ 统一从环境变量获取API Key
+        # ✅ 优先从环境变量获取API Key (使用os.getenv)
         api_key = os.getenv(env_key)
+
+        # ✅ 如果os.getenv没有获取到,尝试从dotenv加载后再次获取
+        if not api_key:
+            try:
+                from dotenv import load_dotenv
+                load_dotenv()  # 重新加载.env文件
+                api_key = os.getenv(env_key)
+                if api_key:
+                    logger.info(f"从.env文件重新加载了 {env_key}")
+            except Exception as e:
+                logger.warning(f"重新加载.env文件失败: {e}")
 
         # ✅ 如果环境变量没有，尝试从数据库配置获取（统一处理所有provider）
         if not api_key and self.db_session:
@@ -158,7 +169,7 @@ class LLMService:
 
             # 记录使用量
             if user_id:
-                await self.usage_service.increment_usage(user_id)
+                await self.usage_service.increment(f"user_{user_id}_api_calls")
 
             logger.info(
                 f"{provider} API 调用成功，响应长度: {len(full_response)}, "

@@ -187,3 +187,9 @@ class BlueprintPatch(BaseModel):
 class EditChapterRequest(BaseModel):
     chapter_number: int
     content: str
+
+
+class DenoiseChapterRequest(BaseModel):
+    """AI去味请求"""
+    chapter_number: int
+    version_index: Optional[int] = Field(default=None, description="要去味的版本索引，默认为当前选中版本")

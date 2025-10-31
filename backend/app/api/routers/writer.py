@@ -16,6 +16,7 @@ from ...db.session import get_session
 from ...models.novel import Chapter, ChapterOutline
 from ...schemas.novel import (
     DeleteChapterRequest,
+    DenoiseChapterRequest,
     EditChapterRequest,
     EvaluateChapterRequest,
     GenerateChapterRequest,
@@ -25,6 +26,7 @@ from ...schemas.novel import (
     UpdateChapterOutlineRequest,
 )
 from ...schemas.user import UserInDB
+from ...services.ai_denoising_service import AIDenoisingService
 from ...services.chapter_context_service import ChapterContextService
 from ...services.chapter_ingest_service import ChapterIngestionService
 from ...services.llm_service import LLMService
@@ -52,6 +54,51 @@ def _extract_tail_excerpt(text: Optional[str], limit: int = 500) -> str:
     return stripped[-limit:]
 
 
+async def _check_prerequisites(
+    session: AsyncSession,
+    project_id: str,
+    chapter_number: int
+) -> tuple[bool, str]:
+    """
+    ✅ 新增函数：检查章节前置条件
+
+    确保在生成章节前，所有前置章节都已完成。
+
+    Args:
+        session: 数据库会话
+        project_id: 项目ID
+        chapter_number: 要生成的章节号
+
+    Returns:
+        (可否生成, 错误信息)
+    """
+    if chapter_number == 1:
+        return True, ""
+
+    # 查询所有前置章节
+    stmt = (
+        select(Chapter)
+        .where(Chapter.project_id == project_id)
+        .where(Chapter.chapter_number < chapter_number)
+        .order_by(Chapter.chapter_number)
+    )
+    result = await session.execute(stmt)
+    previous_chapters = result.scalars().all()
+
+    # 检查是否都有内容
+    incomplete = [
+        ch for ch in previous_chapters
+        if not ch.selected_version or not ch.selected_version.content
+    ]
+
+    if incomplete:
+        missing_numbers = [str(ch.chapter_number) for ch in incomplete]
+        error_msg = f"需要先完成前置章节：第 {', '.join(missing_numbers)} 章"
+        return False, error_msg
+
+    return True, ""
+
+
 @router.post("/novels/{project_id}/chapters/generate", response_model=NovelProjectSchema)
 async def generate_chapter(
     project_id: str,
@@ -65,6 +112,15 @@ async def generate_chapter(
 
     project = await novel_service.ensure_project_owner(project_id, current_user.id)
     logger.info("用户 %s 开始为项目 %s 生成第 %s 章", current_user.id, project_id, request.chapter_number)
+
+    # ✅ 新增：检查前置条件
+    can_generate, error_msg = await _check_prerequisites(
+        session, project_id, request.chapter_number
+    )
+    if not can_generate:
+        logger.warning("项目 %s 第 %s 章前置条件检查失败: %s", project_id, request.chapter_number, error_msg)
+        raise HTTPException(status_code=400, detail=error_msg)
+
     outline = await novel_service.get_outline(project_id, request.chapter_number)
     if not outline:
         logger.warning("项目 %s 未找到第 %s 章纲要，生成流程终止", project_id, request.chapter_number)
@@ -701,3 +757,91 @@ async def export_all_chapters(
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
         }
     )
+
+
+@router.post("/novels/{project_id}/chapters/denoise", response_model=NovelProjectSchema)
+async def denoise_chapter(
+    project_id: str,
+    request: DenoiseChapterRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> NovelProjectSchema:
+    """
+    ✅ 新增API：AI去味功能
+
+    对指定章节的内容进行AI去味处理，去除AI生成文本的机械感。
+
+    Args:
+        project_id: 项目ID
+        request: 去味请求（包含章节号和版本索引）
+        session: 数据库会话
+        current_user: 当前用户
+
+    Returns:
+        更新后的项目Schema
+    """
+    novel_service = NovelService(session)
+    denoising_service = AIDenoisingService(session)
+
+    project = await novel_service.ensure_project_owner(project_id, current_user.id)
+    logger.info(
+        "用户 %s 开始对项目 %s 的第 %s 章进行AI去味",
+        current_user.id, project_id, request.chapter_number
+    )
+
+    # ✅ 修复：使用正确的方式获取章节（从project.chapters中查找）
+    chapter = next(
+        (ch for ch in project.chapters if ch.chapter_number == request.chapter_number),
+        None
+    )
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    # 确定要去味的版本
+    if request.version_index is not None:
+        # 使用指定版本
+        if request.version_index < 0 or request.version_index >= len(chapter.versions):
+            raise HTTPException(status_code=400, detail="版本索引无效")
+        target_version = chapter.versions[request.version_index]
+    else:
+        # 使用当前选中版本
+        if not chapter.selected_version:
+            raise HTTPException(status_code=400, detail="章节没有选中的版本")
+        target_version = chapter.selected_version
+
+    if not target_version.content:
+        raise HTTPException(status_code=400, detail="版本内容为空")
+
+    # 执行去味
+    original_content = target_version.content
+    logger.info(f"开始去味，原文长度={len(original_content)}")
+
+    denoised_content = await denoising_service.denoise_chapter(
+        chapter_content=original_content,
+        user_id=current_user.id,
+        timeout=60.0,
+    )
+
+    # ✅ 修复：使用正确的方式添加新版本
+    # 方案1：直接修改当前版本的内容（最简单，类似edit_chapter）
+    # 方案2：创建新版本（需要使用replace_chapter_versions）
+
+    # 这里使用方案1：直接修改当前版本（保持简单）
+    target_version.content = denoised_content
+    target_version.extra = target_version.extra or {}
+    target_version.extra["denoising_metadata"] = {
+        "source": "ai_denoising",
+        "original_length": len(original_content),
+        "denoised_length": len(denoised_content),
+        "denoised_at": datetime.now().isoformat(),
+    }
+
+    chapter.word_count = len(denoised_content)
+    await session.commit()
+
+    logger.info(
+        f"AI去味完成，原文长度={len(original_content)}，"
+        f"去味后长度={len(denoised_content)}"
+    )
+
+    return await _load_project_schema(novel_service, project_id, current_user.id)

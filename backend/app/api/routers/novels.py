@@ -157,6 +157,7 @@ async def converse_with_concept(
     system_prompt = _ensure_prompt(await prompt_service.get_prompt("concept"), "concept")
     system_prompt = f"{system_prompt}\n{JSON_RESPONSE_INSTRUCTION}"
 
+    # 调用LLM服务进行概念对话
     llm_response = await llm_service.get_llm_response(
         system_prompt=system_prompt,
         conversation_history=conversation_history,
@@ -164,6 +165,7 @@ async def converse_with_concept(
         user_id=current_user.id,
         timeout=240.0,
     )
+
     llm_response = remove_think_tags(llm_response)
 
     try:
@@ -244,6 +246,8 @@ async def generate_blueprint(
         )
 
     system_prompt = _ensure_prompt(await prompt_service.get_prompt("screenwriting"), "screenwriting")
+
+    # 调用LLM服务生成蓝图
     blueprint_raw = await llm_service.get_llm_response(
         system_prompt=system_prompt,
         conversation_history=formatted_history,
@@ -251,6 +255,7 @@ async def generate_blueprint(
         user_id=current_user.id,
         timeout=480.0,
     )
+
     blueprint_raw = remove_think_tags(blueprint_raw)
 
     blueprint_normalized = unwrap_markdown_json(blueprint_raw)

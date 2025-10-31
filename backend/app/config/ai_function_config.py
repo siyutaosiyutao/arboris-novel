@@ -42,6 +42,9 @@ class AIFunctionType(str, Enum):
     # F10: 卷名生成
     VOLUME_NAMING = "volume_naming"
 
+    # F11: AI去味
+    AI_DENOISING = "ai_denoising"
+
 
 class ProviderConfig(BaseModel):
     """API提供商配置"""
@@ -66,167 +69,166 @@ class FunctionRouteConfig(BaseModel):
 # ==================== AI功能配置 ====================
 
 AI_FUNCTION_ROUTES: Dict[AIFunctionType, FunctionRouteConfig] = {
-    # F01: 概念对话 - 使用Gemini（快速响应）
+    # F01: 概念对话 - 使用DeepSeek
     AIFunctionType.CONCEPT_DIALOGUE: FunctionRouteConfig(
         function_type=AIFunctionType.CONCEPT_DIALOGUE,
         primary=ProviderConfig(
-            provider="gemini",
-            model="gemini-2.0-flash-exp",
+            provider="siliconflow",
+            model="deepseek-ai/DeepSeek-V3",
         ),
-        fallbacks=[
-            ProviderConfig(provider="siliconflow", model="deepseek-ai/DeepSeek-V3"),
-        ],
+        fallbacks=[],  # 暂时移除fallback
         temperature=0.8,
         timeout=240.0,
         max_retries=2,
         required=True,
     ),
-    
-    # F02: 蓝图生成 - 使用硅基流动DeepSeek-V3（高质量）
+
+    # F02: 蓝图生成 - 使用DeepSeek
     AIFunctionType.BLUEPRINT_GENERATION: FunctionRouteConfig(
         function_type=AIFunctionType.BLUEPRINT_GENERATION,
         primary=ProviderConfig(
             provider="siliconflow",
             model="deepseek-ai/DeepSeek-V3",
         ),
-        fallbacks=[
-            ProviderConfig(provider="gemini", model="gemini-2.0-flash-exp"),
-        ],
+        fallbacks=[],  # 暂时移除fallback
         temperature=0.8,
         timeout=300.0,
         max_retries=2,
         required=True,
     ),
-    
-    # F03: 批量大纲生成 - 使用硅基流动DeepSeek-V3
+
+    # F03: 批量大纲生成 - 使用DeepSeek
     AIFunctionType.OUTLINE_GENERATION: FunctionRouteConfig(
         function_type=AIFunctionType.OUTLINE_GENERATION,
         primary=ProviderConfig(
             provider="siliconflow",
             model="deepseek-ai/DeepSeek-V3",
         ),
-        fallbacks=[
-            ProviderConfig(provider="gemini", model="gemini-2.0-flash-exp"),
-        ],
+        fallbacks=[],  # 暂时移除fallback
         temperature=0.8,
         timeout=360.0,
         max_retries=2,
         required=True,
     ),
-    
-    # F04: 章节正文生成 - 使用硅基流动DeepSeek-V3（最重要）
+
+    # F04: 章节正文生成 - 使用DeepSeek
     AIFunctionType.CHAPTER_CONTENT_WRITING: FunctionRouteConfig(
         function_type=AIFunctionType.CHAPTER_CONTENT_WRITING,
         primary=ProviderConfig(
             provider="siliconflow",
             model="deepseek-ai/DeepSeek-V3",
         ),
-        fallbacks=[
-            ProviderConfig(provider="gemini", model="gemini-2.0-flash-exp"),
-        ],
+        fallbacks=[],  # 暂时移除fallback
         temperature=0.9,
         timeout=600.0,
         max_retries=3,
         required=True,
     ),
-    
-    # F05: 章节摘要提取 - 使用Gemini Flash（快速+便宜）
+
+    # F05: 章节摘要提取 - 使用DeepSeek
     AIFunctionType.SUMMARY_EXTRACTION: FunctionRouteConfig(
         function_type=AIFunctionType.SUMMARY_EXTRACTION,
         primary=ProviderConfig(
-            provider="gemini",
-            model="gemini-2.0-flash-exp",
+            provider="siliconflow",
+            model="deepseek-ai/DeepSeek-V3",
         ),
-        fallbacks=[
-            ProviderConfig(provider="siliconflow", model="Qwen/Qwen2.5-7B-Instruct"),
-        ],
+        fallbacks=[],  # 暂时移除fallback
         temperature=0.15,
         timeout=180.0,
         max_retries=2,
         required=True,
     ),
-    
-    # F06: 基础分析 - 使用Gemini Flash
+
+    # F06: 基础分析 - 使用DeepSeek
     AIFunctionType.BASIC_ANALYSIS: FunctionRouteConfig(
         function_type=AIFunctionType.BASIC_ANALYSIS,
         primary=ProviderConfig(
-            provider="gemini",
-            model="gemini-2.0-flash-exp",
+            provider="siliconflow",
+            model="deepseek-ai/DeepSeek-V3",
         ),
-        fallbacks=[
-            ProviderConfig(provider="siliconflow", model="Qwen/Qwen2.5-7B-Instruct"),
-        ],
+        fallbacks=[],  # 暂时移除fallback
         temperature=0.3,
         timeout=180.0,
         max_retries=2,
         required=True,
     ),
-    
-    # F07: 增强分析 - 使用硅基流动DeepSeek-V3（可选功能）
+
+    # F07: 增强分析 - 使用DeepSeek
     AIFunctionType.ENHANCED_ANALYSIS: FunctionRouteConfig(
         function_type=AIFunctionType.ENHANCED_ANALYSIS,
         primary=ProviderConfig(
             provider="siliconflow",
             model="deepseek-ai/DeepSeek-V3",
         ),
-        fallbacks=[
-            ProviderConfig(provider="gemini", model="gemini-2.0-flash-exp"),
-        ],
+        fallbacks=[],  # 暂时移除fallback
         temperature=0.5,
         timeout=600.0,
         max_retries=1,
         async_mode=True,
         required=False,  # 失败可跳过
     ),
-    
-    # F08: 角色追踪 - 使用Gemini
+
+    # F08: 角色追踪 - 使用DeepSeek
     AIFunctionType.CHARACTER_TRACKING: FunctionRouteConfig(
         function_type=AIFunctionType.CHARACTER_TRACKING,
         primary=ProviderConfig(
-            provider="gemini",
-            model="gemini-2.0-flash-exp",
+            provider="siliconflow",
+            model="deepseek-ai/DeepSeek-V3",
         ),
-        fallbacks=[
-            ProviderConfig(provider="siliconflow", model="Qwen/Qwen2.5-7B-Instruct"),
-        ],
+        fallbacks=[],  # 暂时移除fallback
         temperature=0.3,
         timeout=300.0,
         max_retries=1,
         async_mode=True,
         required=False,
     ),
-    
-    # F09: 世界观扩展 - 使用硅基流动
+
+    # F09: 世界观扩展 - 使用DeepSeek
     AIFunctionType.WORLDVIEW_EXPANSION: FunctionRouteConfig(
         function_type=AIFunctionType.WORLDVIEW_EXPANSION,
         primary=ProviderConfig(
             provider="siliconflow",
             model="deepseek-ai/DeepSeek-V3",
         ),
-        fallbacks=[
-            ProviderConfig(provider="gemini", model="gemini-2.0-flash-exp"),
-        ],
+        fallbacks=[],  # 暂时移除fallback
         temperature=0.7,
         timeout=300.0,
         max_retries=1,
         async_mode=True,
         required=False,
     ),
-    
-    # F10: 卷名生成 - 使用Gemini Flash（快速）
+
+    # F10: 卷名生成 - 使用DeepSeek
     AIFunctionType.VOLUME_NAMING: FunctionRouteConfig(
         function_type=AIFunctionType.VOLUME_NAMING,
+        primary=ProviderConfig(
+            provider="siliconflow",
+            model="deepseek-ai/DeepSeek-V3",
+        ),
+        fallbacks=[],  # 暂时移除fallback
+        temperature=0.7,
+        timeout=30.0,
+        max_retries=1,
+        required=False,  # 失败返回默认卷名
+    ),
+
+    # F11: AI去味 - 使用Gemini（擅长自然语言处理）
+    AIFunctionType.AI_DENOISING: FunctionRouteConfig(
+        function_type=AIFunctionType.AI_DENOISING,
         primary=ProviderConfig(
             provider="gemini",
             model="gemini-2.0-flash-exp",
         ),
         fallbacks=[
-            ProviderConfig(provider="siliconflow", model="Qwen/Qwen2.5-7B-Instruct"),
+            ProviderConfig(
+                provider="siliconflow",
+                model="deepseek-ai/DeepSeek-V3",
+            ),
         ],
-        temperature=0.7,
-        timeout=30.0,
-        max_retries=1,
-        required=False,  # 失败返回默认卷名
+        temperature=0.8,  # 稍高的温度，增加自然度
+        timeout=60.0,
+        max_retries=2,
+        required=False,  # 失败返回原文
     ),
 }
 
