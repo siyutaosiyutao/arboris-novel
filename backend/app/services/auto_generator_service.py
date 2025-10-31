@@ -462,7 +462,8 @@ class AutoGeneratorService:
                     selectinload(Project.conversations),
                     joinedload(Project.blueprint),  # 使用 joinedload 确保 blueprint 被加载
                     selectinload(Project.characters),
-                    selectinload(Project.relationships_)
+                    selectinload(Project.relationships_),
+                    selectinload(Project.volumes)  # ✅ 修复：预加载 volumes 以避免 greenlet_spawn 错误
                 )
             )
             project = result.scalar_one_or_none()
@@ -477,6 +478,7 @@ class AutoGeneratorService:
             _ = project.blueprint
             _ = project.characters
             _ = project.relationships_
+            _ = project.volumes  # ✅ 修复：确保 volumes 被加载
             for ch in project.chapters:
                 _ = ch.versions
                 _ = ch.selected_version
@@ -509,18 +511,22 @@ class AutoGeneratorService:
                     )
                     existing.real_summary = remove_think_tags(summary)
                     await db.commit()
-                # ✅ 修复：避免重复调用 get() 导致的潜在 None 引用错误
-                outline = outlines_map.get(existing.chapter_number)
+                # ✅ 修复:使用不同的变量名避免覆盖当前章节的 outline
+                existing_outline = outlines_map.get(existing.chapter_number)
                 completed_chapters.append({
                     "chapter_number": existing.chapter_number,
-                    "title": outline.title if outline else f"第{existing.chapter_number}章",
+                    "title": existing_outline.title if existing_outline else f"第{existing.chapter_number}章",
                     "summary": existing.real_summary,
+                    "content": existing.selected_version.content,  # ✅ 新增：保存完整内容用于智能分层
                 })
                 previous_summary_text = existing.real_summary or ""
                 # 提取结尾
                 content = existing.selected_version.content
                 lines = content.split('\n')
                 previous_tail_excerpt = '\n'.join(lines[-10:]) if len(lines) > 10 else content
+
+            # ✅ 新增：构建智能分层的前置章节内容
+            previous_chapters_context = cls._build_previous_chapters_context(completed_chapters)
 
             # 构建蓝图
             project_schema = await novel_service._serialize_project(project)
@@ -558,6 +564,7 @@ class AutoGeneratorService:
 
             prompt_sections = [
                 ("[世界蓝图](JSON)", blueprint_text),
+                ("[前置章节内容]", previous_chapters_context or "暂无"),  # ✅ 修改：使用智能分层的前置章节内容
                 ("[上一章摘要]", previous_summary_text or "暂无"),
                 ("[上一章结尾]", previous_tail_excerpt or "暂无"),
                 ("[检索到的剧情上下文](Markdown)", rag_chunks_text),
@@ -570,14 +577,33 @@ class AutoGeneratorService:
             version_count = task.generation_config.get("version_count", 2)
             raw_versions = []
 
+            # ✅ 使用AI路由系统生成章节内容
+            from ..services.ai_orchestrator_helper import generate_chapter_content
+
             for idx in range(version_count):
-                response = await llm_service.get_llm_response(
-                    system_prompt=writer_prompt,
-                    conversation_history=[{"role": "user", "content": prompt_input}],
-                    temperature=0.9,
-                    user_id=task.user_id,
-                    timeout=600.0,
+                # 记录任务日志
+                await cls._log(
+                    db,
+                    task.id,
+                    "info",
+                    f"正在生成第 {next_chapter_number} 章的第 {idx + 1} 个版本（使用 SiliconFlow DeepSeek-V3）..."
                 )
+
+                logger.info(
+                    f"开始调用AI功能: CHAPTER_CONTENT_WRITING, 章节: {next_chapter_number}, 版本: {idx + 1}"
+                )
+
+                response = await generate_chapter_content(
+                    db_session=db,
+                    system_prompt=writer_prompt,
+                    user_prompt=prompt_input,
+                    user_id=task.user_id,
+                )
+
+                logger.info(
+                    f"AI功能调用成功: CHAPTER_CONTENT_WRITING, 章节: {next_chapter_number}, 版本: {idx + 1}"
+                )
+
                 cleaned = remove_think_tags(response)
                 normalized = unwrap_markdown_json(cleaned)
                 try:
@@ -606,20 +632,26 @@ class AutoGeneratorService:
 
             # 如果启用自动选择，选择第一个版本
             if task.auto_select_version:
-                # 重新查询 chapter 并预加载 versions 关系
+                # 重新查询 chapter 并预加载 versions 和 selected_version 关系
                 result = await db.execute(
                     select(Chapter)
                     .where(
                         Chapter.project_id == task.project_id,
                         Chapter.chapter_number == next_chapter_number
                     )
-                    .options(selectinload(Chapter.versions))
+                    .options(
+                        selectinload(Chapter.versions),
+                        selectinload(Chapter.selected_version)
+                    )
                 )
                 chapter_obj = result.scalar_one_or_none()
 
                 if chapter_obj and chapter_obj.versions:
                     # 选择第一个版本（索引为 0）
                     await novel_service.select_chapter_version(chapter_obj, 0)
+
+                    # ✅ 修复：刷新 chapter_obj 以加载 selected_version 关系
+                    await db.refresh(chapter_obj, ["selected_version"])
 
                     await cls._log(
                         db,
@@ -687,6 +719,9 @@ class AutoGeneratorService:
             await db.commit()
 
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            logger.error(f"第 {next_chapter_number} 章生成失败: {str(e)}\n{error_details}")
             await cls._log(
                 db,
                 task.id,
@@ -997,14 +1032,30 @@ class AutoGeneratorService:
             },
         }
 
-        # 调用LLM生成大纲
-        llm_service = LLMService(db)
-        response = await llm_service.get_llm_response(
+        # ✅ 使用AI路由系统生成大纲
+        from ..services.ai_orchestrator_helper import generate_outline
+
+        # 记录任务日志
+        await cls._log(
+            db,
+            task.id,
+            "info",
+            f"正在生成第 {start_chapter}-{start_chapter + num_chapters - 1} 章大纲（使用 SiliconFlow DeepSeek-V3）..."
+        )
+
+        logger.info(
+            f"开始调用AI功能: OUTLINE_GENERATION, 章节范围: {start_chapter}-{start_chapter + num_chapters - 1}"
+        )
+
+        response = await generate_outline(
+            db_session=db,
             system_prompt=outline_prompt,
-            conversation_history=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
-            temperature=0.7,
+            user_prompt=json.dumps(payload, ensure_ascii=False),
             user_id=user_id,
-            timeout=360.0,
+        )
+
+        logger.info(
+            f"AI功能调用成功: OUTLINE_GENERATION, 章节范围: {start_chapter}-{start_chapter + num_chapters - 1}"
         )
 
         # 解析响应
@@ -1104,12 +1155,35 @@ class AutoGeneratorService:
 
         content = chapter.selected_version.content
 
-        # 生成摘要
-        summary = await llm_service.get_summary(
+        # ✅ 使用AI路由系统生成摘要
+        from ..services.ai_orchestrator_helper import generate_summary
+        from ..services.prompt_service import PromptService
+
+        # 记录任务日志
+        await cls._log(
+            db,
+            task.id,
+            "info",
+            f"正在生成第 {chapter.chapter_number} 章摘要（使用 Gemini Flash）..."
+        )
+
+        logger.info(
+            f"开始调用AI功能: SUMMARY_EXTRACTION, 章节: {chapter.chapter_number}"
+        )
+
+        # 获取摘要提示词
+        prompt_service = PromptService(db)
+        system_prompt = await prompt_service.get_prompt("extraction")
+
+        summary = await generate_summary(
+            db_session=db,
+            system_prompt=system_prompt,
             chapter_content=content,
-            temperature=0.2,
             user_id=task.user_id,
-            timeout=180.0
+        )
+
+        logger.info(
+            f"AI功能调用成功: SUMMARY_EXTRACTION, 章节: {chapter.chapter_number}"
         )
 
         # 保存摘要（不commit，由调用者控制）
@@ -1499,3 +1573,52 @@ class AutoGeneratorService:
                 f"类型={ftype}, 置信度={confidence:.2f}, "
                 f"内容={content[:50]}..."
             )
+
+    @staticmethod
+    def _build_previous_chapters_context(completed_chapters: List[dict]) -> str:
+        """
+        ✅ 新增：构建前置章节上下文（智能分层）
+
+        策略：
+        - 少于3章：全部用完整内容
+        - 多于3章：早期章节用摘要，最近3章用完整内容
+
+        Args:
+            completed_chapters: 已完成章节列表，每个元素包含 chapter_number, title, summary, content
+
+        Returns:
+            格式化的前置章节上下文字符串
+        """
+        if not completed_chapters:
+            return ""
+
+        # ✅ 向后兼容：少于3章时，全部用完整内容
+        if len(completed_chapters) <= 3:
+            result = []
+            for ch in completed_chapters:
+                result.append(
+                    f"=== 第{ch['chapter_number']}章：{ch['title']} ===\n{ch['content']}"
+                )
+            return "\n\n".join(result)
+
+        # ✅ 新增：多于3章时，智能分层
+        early_chapters = completed_chapters[:-3]
+        recent_chapters = completed_chapters[-3:]
+
+        result = "【前期剧情概要】\n"
+        early_summaries = []
+        for ch in early_chapters:
+            early_summaries.append(
+                f"第{ch['chapter_number']}章《{ch['title']}》：{ch['summary']}"
+            )
+        result += "\n".join(early_summaries)
+
+        result += "\n\n【最近章节完整内容】\n"
+        recent_contents = []
+        for ch in recent_chapters:
+            recent_contents.append(
+                f"=== 第{ch['chapter_number']}章：{ch['title']} ===\n{ch['content']}"
+            )
+        result += "\n\n".join(recent_contents)
+
+        return result

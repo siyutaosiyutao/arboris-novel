@@ -18,7 +18,7 @@ const fullText = props.text;
 const displayedText = ref('');
 let index = 0;
 // ✅ 修复：保存定时器引用，防止内存泄漏
-let interval: number | null = null;
+let interval: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
   interval = setInterval(() => {
