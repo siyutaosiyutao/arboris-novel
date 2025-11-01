@@ -44,6 +44,18 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+SUDO_CMD=""
+ensure_sudo() {
+    if [ "$EUID" -ne 0 ]; then
+        if command_exists sudo; then
+            SUDO_CMD="sudo"
+        else
+            log_error "安装系统依赖需要 root 权限，请使用 root 用户或先安装 sudo 后重试"
+            exit 1
+        fi
+    fi
+}
+
 # 检查 Python 版本
 check_python() {
     log_info "检查 Python 版本..."
@@ -56,11 +68,56 @@ check_python() {
     log_success "Python 版本: $python_version"
 }
 
+# 安装 Node.js（如缺失）
+install_nodejs() {
+    if command_exists node; then
+        return
+    fi
+
+    ensure_sudo
+
+    if command_exists apt-get; then
+        log_warning "未找到 Node.js，尝试使用 apt 自动安装 Node.js 20 LTS..."
+        export DEBIAN_FRONTEND=noninteractive
+        $SUDO_CMD apt-get update
+        $SUDO_CMD apt-get install -y ca-certificates curl gnupg
+        $SUDO_CMD mkdir -p /etc/apt/keyrings
+        if [ ! -f /etc/apt/keyrings/nodesource.gpg ]; then
+            curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | $SUDO_CMD gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+        fi
+        echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | $SUDO_CMD tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+        $SUDO_CMD apt-get update
+        $SUDO_CMD apt-get install -y nodejs
+        hash -r
+        return
+    fi
+
+    if command_exists dnf || command_exists yum; then
+        pkg_mgr="dnf"
+        if command_exists yum; then
+            pkg_mgr="yum"
+        fi
+        log_warning "未找到 Node.js，尝试使用 $pkg_mgr 自动安装 Node.js 20 LTS..."
+        if ! command_exists curl; then
+            $SUDO_CMD $pkg_mgr install -y curl
+        fi
+        curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO_CMD bash -
+        $SUDO_CMD $pkg_mgr install -y nodejs
+        hash -r
+        return
+    fi
+
+    log_error "未能自动安装 Node.js，请手动安装 Node.js 20.19.0+ 后重试"
+    exit 1
+}
+
 # 检查 Node.js 版本
 check_nodejs() {
     log_info "检查 Node.js 版本..."
+    install_nodejs
+
     if ! command_exists node; then
-        log_error "未找到 Node.js，请先安装 Node.js 20.19.0+"
+        log_error "Node.js 安装失败，请手动安装 Node.js 20.19.0+"
         exit 1
     fi
 
@@ -72,7 +129,12 @@ check_nodejs() {
 check_npm() {
     log_info "检查 npm 版本..."
     if ! command_exists npm; then
-        log_error "未找到 npm，请先安装 npm"
+        log_warning "未找到 npm，尝试通过重新安装 Node.js 获取 npm..."
+        install_nodejs
+    fi
+
+    if ! command_exists npm; then
+        log_error "未能检测到 npm，请手动安装 Node.js/npm"
         exit 1
     fi
 
@@ -81,7 +143,8 @@ check_npm() {
 }
 
 # 获取项目根目录
-PROJECT_DIR=$(cd "$(dirname "$0")" && pwd)
+# 脚本位于项目的 scripts/ 目录内，因此需要回到上一层
+PROJECT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 BACKEND_DIR="$PROJECT_DIR/backend"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 
@@ -125,18 +188,87 @@ main() {
     log_info "激活虚拟环境..."
     source venv/bin/activate
 
+    # 确保 pip 可用
+    PYTHON_BIN=python3
+    PIP_CMD="$PYTHON_BIN -m pip"
+
+    if ! $PIP_CMD --version >/dev/null 2>&1; then
+        log_warning "虚拟环境中未检测到 pip，尝试安装..."
+        if $PYTHON_BIN -m ensurepip --upgrade >/dev/null 2>&1; then
+            hash -r
+            log_success "pip 安装成功"
+        else
+            log_error "pip 安装失败，请确认 Python 安装完整或手动运行: python3 -m ensurepip --upgrade"
+            exit 1
+        fi
+    fi
+
     # 安装依赖
     log_info "安装 Python 依赖..."
-    pip install --upgrade pip -q
-    pip install -r requirements.txt -q
-    log_success "Python 依赖安装完成"
+    if $PIP_CMD show fastapi >/dev/null 2>&1 && $PIP_CMD show uvicorn >/dev/null 2>&1; then
+        log_warning "检测到虚拟环境已安装主要依赖，跳过重新安装"
+    else
+        $PIP_CMD install --upgrade pip -q || log_warning "pip 升级失败，将使用当前版本"
+        if $PIP_CMD install -r requirements.txt -q; then
+            log_success "Python 依赖安装完成"
+        else
+            log_error "安装 Python 依赖失败，请检查网络或手动运行: pip install -r requirements.txt"
+            exit 1
+        fi
+    fi
+    log_success "Python 环境就绪"
 
     # 检查 .env 文件
     if [ ! -f ".env" ]; then
-        log_warning ".env 文件不存在，这不应该发生（代码已包含 .env）"
-        log_info "请手动编辑 backend/.env 文件，配置 LLM API Key"
+        if [ -f "env.example" ]; then
+            log_info "创建 .env 文件..."
+            cp env.example .env
+
+            GENERATED_SECRET=$(python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(48))
+PY
+            )
+
+            if [ -n "$GENERATED_SECRET" ]; then
+                sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$GENERATED_SECRET|" .env
+            fi
+
+            # 移除会导致 URL 校验失败的空配置
+            python3 - <<'PY'
+from pathlib import Path
+env_path = Path('.env')
+lines = []
+for line in env_path.read_text(encoding='utf-8').splitlines():
+    if line.strip() == 'EMBEDDING_BASE_URL=':
+        lines.append('# EMBEDDING_BASE_URL=')
+    else:
+        lines.append(line)
+env_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+PY
+
+            log_success ".env 文件已根据 env.example 创建"
+            log_warning "请编辑 backend/.env 配置实际的 LLM API Key（OPENAI/GEMINI/DEEPSEEK）"
+        else
+            log_error "缺少 env.example 文件，无法生成 .env"
+            exit 1
+        fi
     else
         log_success ".env 文件已存在"
+        if grep -q '^EMBEDDING_BASE_URL=$' .env; then
+            python3 - <<'PY'
+from pathlib import Path
+env_path = Path('.env')
+lines = []
+for line in env_path.read_text(encoding='utf-8').splitlines():
+    if line.strip() == 'EMBEDDING_BASE_URL=':
+        lines.append('# EMBEDDING_BASE_URL=')
+    else:
+        lines.append(line)
+env_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+PY
+            log_warning "检测到空的 EMBEDDING_BASE_URL 配置，已自动注释以避免校验错误"
+        fi
         log_warning "请确认已配置 LLM API Key（OPENAI_API_KEY 或 GEMINI_API_KEY）"
     fi
 
@@ -159,6 +291,10 @@ main() {
     log_info "安装前端依赖（这可能需要几分钟）..."
     npm install
     log_success "前端依赖安装完成"
+
+    log_info "构建前端产物..."
+    npm run build
+    log_success "前端构建完成"
 
     log_success "前端部署完成"
     echo ""

@@ -246,7 +246,7 @@ import { useNovelStore } from '@/stores/novel'
 import { useAuthStore } from '@/stores/auth'
 import { NovelAPI } from '@/api/novel'
 import { AdminAPI } from '@/api/admin'
-import type { NovelProject, NovelSectionResponse, NovelSectionType } from '@/api/novel'
+import type { ChapterOutline, NovelProject, NovelSectionResponse, NovelSectionType } from '@/api/novel'
 import { logger } from '@/utils/logger'
 import BlueprintEditModal from '@/components/BlueprintEditModal.vue'
 import OverviewSection from '@/components/novel-detail/OverviewSection.vue'
@@ -373,7 +373,8 @@ const activeSection = ref<SectionKey>('overview')
 // Modal state (user mode only)
 const isModalOpen = ref(false)
 const modalTitle = ref('')
-const modalContent = ref<unknown>('')
+type ModalContent = string | Record<string, unknown> | unknown[]
+const modalContent = ref<ModalContent>('')
 const modalField = ref('')
 
 // Add chapter modal state (user mode only)
@@ -561,7 +562,7 @@ const handleSectionEdit = (payload: { field: string; title: string; value: unkno
   if (props.isAdmin) return
   modalField.value = payload.field
   modalTitle.value = payload.title
-  modalContent.value = payload.value
+  modalContent.value = payload.value as ModalContent
   isModalOpen.value = true
 }
 
@@ -609,8 +610,12 @@ const handleSave = async (data: { field: string; content: unknown }) => {
 const startAddChapter = async () => {
   if (props.isAdmin) return
   await ensureProjectLoaded()
-  const outline = sectionData.chapter_outline?.chapter_outline || novel.value?.blueprint?.chapter_outline || []
-  const nextNumber = outline.length > 0 ? Math.max(...outline.map(item => item.chapter_number)) + 1 : 1
+  const outlineData = sectionData.chapter_outline?.chapter_outline as ChapterOutline[] | undefined
+  const blueprintOutline = novel.value?.blueprint?.chapter_outline ?? []
+  const combinedOutline: ChapterOutline[] = outlineData ?? blueprintOutline
+  const nextNumber = combinedOutline.length > 0
+    ? Math.max(...combinedOutline.map((item: ChapterOutline) => item.chapter_number)) + 1
+    : 1
   newChapterTitle.value = `新章节 ${nextNumber}`
   newChapterSummary.value = ''
   isAddChapterModalOpen.value = true
@@ -630,9 +635,11 @@ const saveNewChapter = async () => {
     return
   }
 
-  const existingOutline = project.blueprint?.chapter_outline || []
-  const nextNumber = existingOutline.length > 0 ? Math.max(...existingOutline.map(ch => ch.chapter_number)) + 1 : 1
-  const newOutline = [...existingOutline, {
+  const existingOutline: ChapterOutline[] = project.blueprint?.chapter_outline ?? []
+  const nextNumber = existingOutline.length > 0
+    ? Math.max(...existingOutline.map((ch: ChapterOutline) => ch.chapter_number)) + 1
+    : 1
+  const newOutline: ChapterOutline[] = [...existingOutline, {
     chapter_number: nextNumber,
     title: newChapterTitle.value,
     summary: newChapterSummary.value

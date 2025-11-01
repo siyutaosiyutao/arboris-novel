@@ -144,11 +144,14 @@ const formattedBlueprint = computed(() => {
 
   // Format characters with enhanced styling - 动态兼容所有字段
   const formatCharacters = (characters: Character[]) => {
-    if (!characters || characters.length === 0) return '<p class="text-gray-500 italic">暂无角色信息</p>'
+    if (!Array.isArray(characters) || characters.length === 0) {
+      return '<p class="text-gray-500 italic">暂无角色信息</p>'
+    }
 
-    return characters.map(char => {
-      if (typeof char === 'object' && char.name) {
-        const name = char.name
+    return characters.map(rawChar => {
+      if (typeof rawChar === 'object' && rawChar !== null) {
+        const charRecord = rawChar as Record<string, unknown>
+        const name = typeof charRecord.name === 'string' ? charRecord.name : '未知角色'
 
         // 定义字段映射和图标，支持多种可能的key名称
         const fieldMappings = {
@@ -184,16 +187,15 @@ const formattedBlueprint = computed(() => {
           }
         }
 
-        // 提取所有字段
         const extractedFields: ExtractedFields = {}
-        const usedKeys = new Set(['name']) // 已使用的key
+        const usedKeys = new Set(['name'])
 
-        // 按优先级提取已知字段
         Object.entries(fieldMappings).forEach(([fieldType, mapping]) => {
           for (const key of mapping.keys) {
-            if (char[key] && !usedKeys.has(key)) {
+            const value = charRecord[key]
+            if (typeof value === 'string' && value.trim() && !usedKeys.has(key)) {
               extractedFields[fieldType] = {
-                value: char[key],
+                value,
                 label: mapping.label,
                 priority: mapping.priority
               }
@@ -203,17 +205,15 @@ const formattedBlueprint = computed(() => {
           }
         })
 
-        // 提取剩余的未知字段
-        Object.entries(char).forEach(([key, value]) => {
-          if (!usedKeys.has(key) && value && typeof value === 'string' && value.trim()) {
-            // 为未知字段生成友好的标签
+        Object.entries(charRecord).forEach(([key, value]) => {
+          if (!usedKeys.has(key) && typeof value === 'string' && value.trim()) {
             const friendlyLabel = key
               .replace(/_/g, ' ')
               .replace(/([A-Z])/g, ' $1')
               .replace(/^./, str => str.toUpperCase())
 
             extractedFields[`unknown_${key}`] = {
-              value: value,
+              value,
               label: `📝 ${friendlyLabel}`,
               priority: 99
             }
@@ -221,14 +221,10 @@ const formattedBlueprint = computed(() => {
           }
         })
 
-        // 按优先级排序字段
-        const sortedFields = Object.entries(extractedFields).sort(([,a], [,b]) => a.priority - b.priority)
-
-        // 生成HTML
+        const sortedFields = Object.entries(extractedFields).sort(([, a], [, b]) => a.priority - b.priority)
         let fieldsHTML = ''
         sortedFields.forEach(([fieldType, field]) => {
           if (fieldType === 'role') {
-            // role字段显示为标签，不在详细信息中
             return
           }
 
@@ -241,6 +237,9 @@ const formattedBlueprint = computed(() => {
         })
 
         const roleField = extractedFields.role
+        const roleBadge = roleField
+          ? `<span class="bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full text-xs font-medium">${roleField.value}</span>`
+          : ''
 
         return `
           <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-indigo-400 rounded-lg p-5 mb-4">
@@ -249,7 +248,7 @@ const formattedBlueprint = computed(() => {
                 <span class="w-2 h-2 bg-indigo-500 rounded-full mr-2"></span>
                 ${name}
               </h4>
-              ${roleField ? `<span class="bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full text-xs font-medium">${roleField.value}</span>` : ''}
+              ${roleBadge}
             </div>
             <div class="space-y-3 text-sm">
               ${fieldsHTML}
@@ -257,41 +256,55 @@ const formattedBlueprint = computed(() => {
           </div>
         `
       }
-      // 处理简单的角色结构 (向后兼容)
-      else if (typeof char === 'object' && char.description) {
-        const desc = char.description
-        const identity = desc.identity || ''
-        const personality = desc.personality || ''
-        const relationship = desc.relationship_to_protagonist || ''
+
+      if (typeof rawChar === 'object' && rawChar !== null) {
+        const record = rawChar as Record<string, unknown>
+        const desc = record.description
+        if (desc && typeof desc === 'object') {
+          const identity = typeof (desc as Record<string, unknown>).identity === 'string'
+            ? (desc as Record<string, string>).identity
+            : ''
+          const personality = typeof (desc as Record<string, unknown>).personality === 'string'
+            ? (desc as Record<string, string>).personality
+            : ''
+          const relationship = typeof (desc as Record<string, unknown>).relationship_to_protagonist === 'string'
+            ? (desc as Record<string, string>).relationship_to_protagonist
+            : ''
+
+          return `
+            <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-indigo-400 rounded-lg p-5 mb-4">
+              <h4 class="text-lg font-bold text-indigo-800 mb-3 flex items-center">
+                <span class="w-2 h-2 bg-indigo-500 rounded-full mr-2"></span>
+                ${typeof record.name === 'string' ? record.name : '未知角色'}
+              </h4>
+              <div class="space-y-2 text-sm">
+                ${identity ? `<div class="flex items-start"><span class="font-medium text-gray-600 min-w-16">身份：</span><span class="text-gray-800">${identity}</span></div>` : ''}
+                ${personality ? `<div class="flex items-start"><span class="font-medium text-gray-600 min-w-16">性格：</span><span class="text-gray-800">${personality}</span></div>` : ''}
+                ${relationship ? `<div class="flex items-start"><span class="font-medium text-gray-600 min-w-16">关系：</span><span class="text-gray-800">${relationship}</span></div>` : ''}
+              </div>
+            </div>
+          `
+        }
 
         return `
-          <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-indigo-400 rounded-lg p-5 mb-4">
-            <h4 class="text-lg font-bold text-indigo-800 mb-3 flex items-center">
-              <span class="w-2 h-2 bg-indigo-500 rounded-full mr-2"></span>
-              ${char.name}
-            </h4>
-            <div class="space-y-2 text-sm">
-              ${identity ? `<div class="flex items-start"><span class="font-medium text-gray-600 min-w-16">身份：</span><span class="text-gray-800">${identity}</span></div>` : ''}
-              ${personality ? `<div class="flex items-start"><span class="font-medium text-gray-600 min-w-16">性格：</span><span class="text-gray-800">${personality}</span></div>` : ''}
-              ${relationship ? `<div class="flex items-start"><span class="font-medium text-gray-600 min-w-16">关系：</span><span class="text-gray-800">${relationship}</span></div>` : ''}
-            </div>
-          </div>
-        `
-      }
-      // 处理最简单的结构
-      else {
-        return `
           <div class="bg-gray-50 border-l-4 border-gray-300 rounded-lg p-4 mb-3">
-            <h4 class="font-semibold text-gray-800">${char.name || '未知角色'}</h4>
-            <p class="text-gray-600 text-sm mt-1">${char.description || '无描述'}</p>
+            <h4 class="font-semibold text-gray-800">${typeof record.name === 'string' ? record.name : '未知角色'}</h4>
+            <p class="text-gray-600 text-sm mt-1">${typeof record.description === 'string' ? record.description : '无描述'}</p>
           </div>
         `
       }
+
+      return `
+        <div class="bg-gray-50 border-l-4 border-gray-300 rounded-lg p-4 mb-3">
+          <h4 class="font-semibold text-gray-800">未知角色</h4>
+          <p class="text-gray-600 text-sm mt-1">无描述</p>
+        </div>
+      `
     }).join('')
   }
 
   // Format world setting with enhanced styling
-  const formatWorldSetting = (worldSetting: WorldSetting) => {
+  const formatWorldSetting = (worldSetting?: WorldSetting | null) => {
     if (!worldSetting || typeof worldSetting !== 'object') return '<p class="text-gray-500 italic">暂无世界设定信息</p>'
 
     let html = ''
