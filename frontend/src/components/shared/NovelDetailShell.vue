@@ -247,6 +247,7 @@ import { useAuthStore } from '@/stores/auth'
 import { NovelAPI } from '@/api/novel'
 import { AdminAPI } from '@/api/admin'
 import type { NovelProject, NovelSectionResponse, NovelSectionType } from '@/api/novel'
+import { logger } from '@/utils/logger'
 import BlueprintEditModal from '@/components/BlueprintEditModal.vue'
 import OverviewSection from '@/components/novel-detail/OverviewSection.vue'
 import WorldSettingSection from '@/components/novel-detail/WorldSettingSection.vue'
@@ -439,7 +440,7 @@ const loadSection = async (section: SectionKey, force = false) => {
       overviewMeta.updated_at = response.data?.updated_at || null
     }
   } catch (error) {
-    console.error('加载模块失败:', error)
+    logger.error('加载模块失败:', error)
     sectionError[section] = error instanceof Error ? error.message : '加载失败'
   } finally {
     sectionLoading[section] = false
@@ -504,9 +505,9 @@ const exportAllChapters = async () => {
     window.URL.revokeObjectURL(url)
     document.body.removeChild(a)
 
-    console.log('导出成功')
+    logger.info('导出成功')
   } catch (error) {
-    console.error('导出失败:', error)
+    logger.error('导出失败:', error)
     alert('导出失败: ' + (error instanceof Error ? error.message : '未知错误'))
   } finally {
     isExporting.value = false
@@ -601,7 +602,7 @@ const handleSave = async (data: { field: string; content: any }) => {
     }
     isModalOpen.value = false
   } catch (error) {
-    console.error('保存变更失败:', error)
+    logger.error('保存变更失败:', error)
   }
 }
 
@@ -643,7 +644,7 @@ const saveNewChapter = async () => {
     await loadSection('chapter_outline', true)
     isAddChapterModalOpen.value = false
   } catch (error) {
-    console.error('新增章节失败:', error)
+    logger.error('新增章节失败:', error)
   }
 }
 

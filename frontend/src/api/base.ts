@@ -2,8 +2,10 @@ import { useAuthStore } from '@/stores/auth'
 import router from '@/router'
 
 // API 配置
+// 使用环境变量配置 API Base URL，支持不同部署环境
 // @ts-ignore - Vite 环境变量
-export const API_BASE_URL = import.meta.env.MODE === 'production' ? '' : 'http://127.0.0.1:8000'
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.MODE === 'production' ? '' : 'http://127.0.0.1:8000')
 
 // 统一的 API 请求类
 class APIClient {

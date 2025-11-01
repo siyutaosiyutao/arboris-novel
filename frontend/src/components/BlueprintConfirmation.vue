@@ -129,6 +129,7 @@ import { ref, computed, onUnmounted, inject } from 'vue'
 import { marked } from 'marked'
 import { useNovelStore } from '@/stores/novel'
 import { globalAlert } from '@/composables/useAlert'
+import { logger } from '@/utils/logger'
 
 // 配置 marked
 marked.setOptions({
@@ -215,9 +216,9 @@ const generateBlueprint = async () => {
 
   try {
     // 直接调用store中的API
-    console.log('开始调用generateBlueprint API...')
+    logger.debug('开始调用generateBlueprint API...')
     const response = await novelStore.generateBlueprint()
-    console.log('API调用成功，收到响应:', response)
+    logger.debug('API调用成功，收到响应:', response)
 
     // API成功后，快速完成进度条到100%
     if (progressTimer) {
@@ -239,7 +240,7 @@ const generateBlueprint = async () => {
     emit('blueprintGenerated', response)
 
   } catch (error) {
-    console.error('生成蓝图失败:', error)
+    logger.error('生成蓝图失败:', error)
     clearTimers()
     isGenerating.value = false
     globalAlert.showError(`生成蓝图失败: ${error instanceof Error ? error.message : '未知错误'}`, '生成失败')
