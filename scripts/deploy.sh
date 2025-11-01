@@ -81,7 +81,8 @@ check_npm() {
 }
 
 # 获取项目根目录
-PROJECT_DIR=$(cd "$(dirname "$0")" && pwd)
+# 脚本位于项目的 scripts/ 目录内，因此需要回到上一层
+PROJECT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 BACKEND_DIR="$PROJECT_DIR/backend"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 
@@ -127,16 +128,70 @@ main() {
 
     # 安装依赖
     log_info "安装 Python 依赖..."
-    pip install --upgrade pip -q
-    pip install -r requirements.txt -q
-    log_success "Python 依赖安装完成"
+    if pip show fastapi >/dev/null 2>&1 && pip show uvicorn >/dev/null 2>&1; then
+        log_warning "检测到虚拟环境已安装主要依赖，跳过重新安装"
+    else
+        pip install --upgrade pip -q || log_warning "pip 升级失败，将使用当前版本"
+        if pip install -r requirements.txt -q; then
+            log_success "Python 依赖安装完成"
+        else
+            log_error "安装 Python 依赖失败，请检查网络或手动运行: pip install -r requirements.txt"
+            exit 1
+        fi
+    fi
+    log_success "Python 环境就绪"
 
     # 检查 .env 文件
     if [ ! -f ".env" ]; then
-        log_warning ".env 文件不存在，这不应该发生（代码已包含 .env）"
-        log_info "请手动编辑 backend/.env 文件，配置 LLM API Key"
+        if [ -f "env.example" ]; then
+            log_info "创建 .env 文件..."
+            cp env.example .env
+
+            GENERATED_SECRET=$(python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(48))
+PY
+            )
+
+            if [ -n "$GENERATED_SECRET" ]; then
+                sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$GENERATED_SECRET|" .env
+            fi
+
+            # 移除会导致 URL 校验失败的空配置
+            python3 - <<'PY'
+from pathlib import Path
+env_path = Path('.env')
+lines = []
+for line in env_path.read_text(encoding='utf-8').splitlines():
+    if line.strip() == 'EMBEDDING_BASE_URL=':
+        lines.append('# EMBEDDING_BASE_URL=')
+    else:
+        lines.append(line)
+env_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+PY
+
+            log_success ".env 文件已根据 env.example 创建"
+            log_warning "请编辑 backend/.env 配置实际的 LLM API Key（OPENAI/GEMINI/DEEPSEEK）"
+        else
+            log_error "缺少 env.example 文件，无法生成 .env"
+            exit 1
+        fi
     else
         log_success ".env 文件已存在"
+        if grep -q '^EMBEDDING_BASE_URL=$' .env; then
+            python3 - <<'PY'
+from pathlib import Path
+env_path = Path('.env')
+lines = []
+for line in env_path.read_text(encoding='utf-8').splitlines():
+    if line.strip() == 'EMBEDDING_BASE_URL=':
+        lines.append('# EMBEDDING_BASE_URL=')
+    else:
+        lines.append(line)
+env_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+PY
+            log_warning "检测到空的 EMBEDDING_BASE_URL 配置，已自动注释以避免校验错误"
+        fi
         log_warning "请确认已配置 LLM API Key（OPENAI_API_KEY 或 GEMINI_API_KEY）"
     fi
 
@@ -159,6 +214,10 @@ main() {
     log_info "安装前端依赖（这可能需要几分钟）..."
     npm install
     log_success "前端依赖安装完成"
+
+    log_info "构建前端产物..."
+    npm run build
+    log_success "前端构建完成"
 
     log_success "前端部署完成"
     echo ""

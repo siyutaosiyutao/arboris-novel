@@ -82,10 +82,15 @@ export interface WorldSetting {
 }
 
 export interface Relationship {
-  from_character: string
-  to_character: string
-  relationship_type: string
+  from_character?: string
+  to_character?: string
+  relationship_type?: string
   description?: string
+  character_from?: string
+  character_to?: string
+  source?: string
+  target?: string
+  [key: string]: string | undefined
 }
 
 export interface Blueprint {
@@ -104,12 +109,14 @@ export interface Blueprint {
 
 export interface Character {
   name: string
-  description: string
+  description?: string | Record<string, string | undefined>
   identity?: string
   personality?: string
   goals?: string
   abilities?: string
   relationship_to_protagonist?: string
+  role?: string
+  [key: string]: string | Record<string, string | undefined> | undefined
 }
 
 export interface ChapterOutline {
