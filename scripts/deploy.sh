@@ -44,6 +44,96 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+ensure_curl() {
+    if command_exists curl; then
+        return 0
+    fi
+
+    ensure_sudo
+
+    if command_exists apt-get; then
+        log_warning "未检测到 curl，尝试使用 apt 安装..."
+        export DEBIAN_FRONTEND=noninteractive
+        if ! $SUDO_CMD apt-get update; then
+            log_warning "apt 更新失败，curl 安装可能无法继续"
+            return 1
+        fi
+        if $SUDO_CMD apt-get install -y curl; then
+            return 0
+        fi
+        log_warning "apt 无法自动安装 curl"
+        return 1
+    fi
+
+    local pkg_mgr=""
+    if command_exists dnf; then
+        pkg_mgr="dnf"
+    elif command_exists yum; then
+        pkg_mgr="yum"
+    fi
+
+    if [ -n "$pkg_mgr" ]; then
+        log_warning "未检测到 curl，尝试使用 $pkg_mgr 安装..."
+        if $SUDO_CMD $pkg_mgr install -y curl; then
+            return 0
+        fi
+        log_warning "$pkg_mgr 无法自动安装 curl"
+        return 1
+    fi
+
+    log_warning "当前系统缺少 curl，请手动安装后重试"
+    return 1
+}
+
+SUDO_CMD=""
+ensure_sudo() {
+    if [ "$EUID" -ne 0 ]; then
+        if command_exists sudo; then
+            SUDO_CMD="sudo"
+        else
+            log_error "安装系统依赖需要 root 权限，请使用 root 用户或先安装 sudo 后重试"
+            exit 1
+        fi
+    fi
+}
+
+# 安装 Python 相关系统组件
+install_system_python_components() {
+    ensure_sudo
+
+    if command_exists apt-get; then
+        log_warning "尝试通过 apt 安装 python3-venv 与 python3-pip..."
+        export DEBIAN_FRONTEND=noninteractive
+        if ! $SUDO_CMD apt-get update; then
+            log_warning "apt 更新失败，可能无法安装 python3-venv/python3-pip"
+        fi
+        if $SUDO_CMD apt-get install -y python3-venv python3-pip; then
+            return 0
+        fi
+        log_warning "apt 未能安装 python3-venv/python3-pip"
+        return 1
+    fi
+
+    local pkg_mgr=""
+    if command_exists dnf; then
+        pkg_mgr="dnf"
+    elif command_exists yum; then
+        pkg_mgr="yum"
+    fi
+
+    if [ -n "$pkg_mgr" ]; then
+        log_warning "尝试通过 $pkg_mgr 安装 python3 与 pip 相关组件..."
+        if $SUDO_CMD $pkg_mgr install -y python3 python3-pip python3-virtualenv; then
+            return 0
+        fi
+        log_warning "$pkg_mgr 未能安装所需 Python 组件"
+        return 1
+    fi
+
+    log_warning "无法自动安装 Python 组件，请手动安装 python3-venv 与 pip"
+    return 1
+}
+
 # 检查 Python 版本
 check_python() {
     log_info "检查 Python 版本..."
@@ -56,11 +146,56 @@ check_python() {
     log_success "Python 版本: $python_version"
 }
 
+# 安装 Node.js（如缺失）
+install_nodejs() {
+    if command_exists node; then
+        return
+    fi
+
+    ensure_sudo
+
+    if command_exists apt-get; then
+        log_warning "未找到 Node.js，尝试使用 apt 自动安装 Node.js 20 LTS..."
+        export DEBIAN_FRONTEND=noninteractive
+        $SUDO_CMD apt-get update
+        $SUDO_CMD apt-get install -y ca-certificates curl gnupg
+        $SUDO_CMD mkdir -p /etc/apt/keyrings
+        if [ ! -f /etc/apt/keyrings/nodesource.gpg ]; then
+            curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | $SUDO_CMD gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+        fi
+        echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | $SUDO_CMD tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+        $SUDO_CMD apt-get update
+        $SUDO_CMD apt-get install -y nodejs
+        hash -r
+        return
+    fi
+
+    if command_exists dnf || command_exists yum; then
+        pkg_mgr="dnf"
+        if command_exists yum; then
+            pkg_mgr="yum"
+        fi
+        log_warning "未找到 Node.js，尝试使用 $pkg_mgr 自动安装 Node.js 20 LTS..."
+        if ! command_exists curl; then
+            $SUDO_CMD $pkg_mgr install -y curl
+        fi
+        curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO_CMD bash -
+        $SUDO_CMD $pkg_mgr install -y nodejs
+        hash -r
+        return
+    fi
+
+    log_error "未能自动安装 Node.js，请手动安装 Node.js 20.19.0+ 后重试"
+    exit 1
+}
+
 # 检查 Node.js 版本
 check_nodejs() {
     log_info "检查 Node.js 版本..."
+    install_nodejs
+
     if ! command_exists node; then
-        log_error "未找到 Node.js，请先安装 Node.js 20.19.0+"
+        log_error "Node.js 安装失败，请手动安装 Node.js 20.19.0+"
         exit 1
     fi
 
@@ -72,7 +207,12 @@ check_nodejs() {
 check_npm() {
     log_info "检查 npm 版本..."
     if ! command_exists npm; then
-        log_error "未找到 npm，请先安装 npm"
+        log_warning "未找到 npm，尝试通过重新安装 Node.js 获取 npm..."
+        install_nodejs
+    fi
+
+    if ! command_exists npm; then
+        log_error "未能检测到 npm，请手动安装 Node.js/npm"
         exit 1
     fi
 
@@ -81,7 +221,8 @@ check_npm() {
 }
 
 # 获取项目根目录
-PROJECT_DIR=$(cd "$(dirname "$0")" && pwd)
+# 脚本位于项目的 scripts/ 目录内，因此需要回到上一层
+PROJECT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 BACKEND_DIR="$PROJECT_DIR/backend"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 
@@ -125,18 +266,120 @@ main() {
     log_info "激活虚拟环境..."
     source venv/bin/activate
 
+    # 确保 pip 可用
+    PYTHON_BIN=$(command -v python3 || command -v python)
+    PIP_CMD="$PYTHON_BIN -m pip"
+
+    if ! $PIP_CMD --version >/dev/null 2>&1; then
+        log_warning "虚拟环境中未检测到 pip，尝试安装..."
+        if ! $PYTHON_BIN -m ensurepip --upgrade >/dev/null 2>&1; then
+            log_warning "ensurepip 模块不可用，尝试安装系统 pip 组件..."
+            if install_system_python_components; then
+                hash -r
+                if $PYTHON_BIN -m ensurepip --upgrade >/dev/null 2>&1; then
+                    log_success "pip 安装成功"
+                else
+                    log_warning "ensurepip 仍不可用，尝试使用 get-pip.py..."
+                    if ensure_curl; then
+                        TMP_GET_PIP=$(mktemp /tmp/get-pip.XXXXXX.py)
+                        if curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$TMP_GET_PIP"; then
+                            if $PYTHON_BIN "$TMP_GET_PIP" >/dev/null 2>&1; then
+                                hash -r
+                                log_success "pip 安装成功"
+                            else
+                                log_error "get-pip.py 执行失败，请手动运行: curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3"
+                                rm -f "$TMP_GET_PIP"
+                                exit 1
+                            fi
+                        else
+                            log_error "无法下载 get-pip.py，请检查网络或手动安装 pip"
+                            rm -f "$TMP_GET_PIP"
+                            exit 1
+                        fi
+                        rm -f "$TMP_GET_PIP"
+                    else
+                        log_error "缺少 curl，无法自动下载安装 pip，请手动安装 curl 或 pip"
+                        exit 1
+                    fi
+                fi
+            else
+                log_error "无法自动安装 pip 所需组件，请手动安装 python3-venv 与 pip（例如: sudo apt install python3-venv python3-pip 或 sudo yum install python3 python3-pip）"
+                exit 1
+            fi
+        else
+            hash -r
+            log_success "pip 安装成功"
+        fi
+    else
+        log_success "pip 已就绪"
+    fi
+
     # 安装依赖
     log_info "安装 Python 依赖..."
-    pip install --upgrade pip -q
-    pip install -r requirements.txt -q
-    log_success "Python 依赖安装完成"
+    if $PIP_CMD show fastapi >/dev/null 2>&1 && $PIP_CMD show uvicorn >/dev/null 2>&1; then
+        log_warning "检测到虚拟环境已安装主要依赖，跳过重新安装"
+    else
+        $PIP_CMD install --upgrade pip -q || log_warning "pip 升级失败，将使用当前版本"
+        if $PIP_CMD install -r requirements.txt -q; then
+            log_success "Python 依赖安装完成"
+        else
+            log_error "安装 Python 依赖失败，请检查网络或手动运行: pip install -r requirements.txt"
+            exit 1
+        fi
+    fi
+    log_success "Python 环境就绪"
 
     # 检查 .env 文件
     if [ ! -f ".env" ]; then
-        log_warning ".env 文件不存在，这不应该发生（代码已包含 .env）"
-        log_info "请手动编辑 backend/.env 文件，配置 LLM API Key"
+        if [ -f "env.example" ]; then
+            log_info "创建 .env 文件..."
+            cp env.example .env
+
+            GENERATED_SECRET=$(python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(48))
+PY
+            )
+
+            if [ -n "$GENERATED_SECRET" ]; then
+                sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$GENERATED_SECRET|" .env
+            fi
+
+            # 移除会导致 URL 校验失败的空配置
+            python3 - <<'PY'
+from pathlib import Path
+env_path = Path('.env')
+lines = []
+for line in env_path.read_text(encoding='utf-8').splitlines():
+    if line.strip() == 'EMBEDDING_BASE_URL=':
+        lines.append('# EMBEDDING_BASE_URL=')
+    else:
+        lines.append(line)
+env_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+PY
+
+            log_success ".env 文件已根据 env.example 创建"
+            log_warning "请编辑 backend/.env 配置实际的 LLM API Key（OPENAI/GEMINI/DEEPSEEK）"
+        else
+            log_error "缺少 env.example 文件，无法生成 .env"
+            exit 1
+        fi
     else
         log_success ".env 文件已存在"
+        if grep -q '^EMBEDDING_BASE_URL=$' .env; then
+            python3 - <<'PY'
+from pathlib import Path
+env_path = Path('.env')
+lines = []
+for line in env_path.read_text(encoding='utf-8').splitlines():
+    if line.strip() == 'EMBEDDING_BASE_URL=':
+        lines.append('# EMBEDDING_BASE_URL=')
+    else:
+        lines.append(line)
+env_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+PY
+            log_warning "检测到空的 EMBEDDING_BASE_URL 配置，已自动注释以避免校验错误"
+        fi
         log_warning "请确认已配置 LLM API Key（OPENAI_API_KEY 或 GEMINI_API_KEY）"
     fi
 
@@ -159,6 +402,10 @@ main() {
     log_info "安装前端依赖（这可能需要几分钟）..."
     npm install
     log_success "前端依赖安装完成"
+
+    log_info "构建前端产物..."
+    npm run build
+    log_success "前端构建完成"
 
     log_success "前端部署完成"
     echo ""

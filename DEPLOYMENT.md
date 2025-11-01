@@ -25,12 +25,12 @@ git clone https://github.com/siyutaosiyutao/arboris-novel.git
 cd arboris-novel
 
 # 2. 运行一键部署脚本
-chmod +x deploy.sh
-./deploy.sh
+bash scripts/deploy.sh
 ```
 
 脚本将自动完成：
 - ✅ 检查系统依赖（Python、Node.js、npm）
+- ✅ 在支持的系统上自动安装缺失的 Node.js/npm（apt、yum/dnf）
 - ✅ 安装后端 Python 依赖
 - ✅ 配置环境变量（.env）
 - ✅ 初始化数据库
