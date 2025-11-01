@@ -67,6 +67,27 @@ export interface NovelProjectSummary {
   total_chapters: number
 }
 
+export interface WorldSetting {
+  description?: string
+  rules?: string[]
+  key_locations?: Array<{
+    name: string
+    description: string
+  }>
+  factions?: Array<{
+    name: string
+    description: string
+  }>
+  [key: string]: unknown // 允许其他自定义字段
+}
+
+export interface Relationship {
+  from_character: string
+  to_character: string
+  relationship_type: string
+  description?: string
+}
+
 export interface Blueprint {
   title?: string
   target_audience?: string
@@ -75,9 +96,9 @@ export interface Blueprint {
   tone?: string
   one_sentence_summary?: string
   full_synopsis?: string
-  world_setting?: any
+  world_setting?: WorldSetting
   characters?: Character[]
-  relationships?: any[]
+  relationships?: Relationship[]
   chapter_outline?: ChapterOutline[]
 }
 
@@ -118,10 +139,19 @@ export interface ConversationMessage {
   content: string
 }
 
+export interface UserInput {
+  id: string | null
+  value: string | null
+}
+
+export interface ConversationState {
+  [key: string]: unknown
+}
+
 export interface ConverseResponse {
   ai_message: string
   ui_control: UIControl
-  conversation_state: any
+  conversation_state: ConversationState
   is_complete: boolean
   ready_for_blueprint?: boolean  // 新增：表示准备生成蓝图
 }
@@ -151,9 +181,22 @@ export interface DeleteNovelsResponse {
 
 export type NovelSectionType = 'overview' | 'world_setting' | 'characters' | 'relationships' | 'chapter_outline' | 'chapters' | 'auto_generator' | 'fanqie_upload'
 
+export interface NovelSectionData {
+  title?: string
+  updated_at?: string | null
+  world_setting?: WorldSetting
+  characters?: Character[]
+  relationships?: Relationship[]
+  chapter_outline?: ChapterOutline[]
+  chapters?: Chapter[]
+  volumes?: unknown[]
+  project_title?: string
+  [key: string]: unknown
+}
+
 export interface NovelSectionResponse {
   section: NovelSectionType
-  data: Record<string, any>
+  data: NovelSectionData
 }
 
 // API 函数 - 使用统一的路由配置
@@ -183,8 +226,8 @@ export class NovelAPI {
 
   static async converseConcept(
     projectId: string,
-    userInput: any,
-    conversationState: any = {}
+    userInput: UserInput | null,
+    conversationState: ConversationState = {}
   ): Promise<ConverseResponse> {
     const formattedUserInput = userInput || { id: null, value: null }
     return request(`${NOVELS_BASE}/${projectId}/concept/converse`, {

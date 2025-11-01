@@ -373,7 +373,7 @@ const activeSection = ref<SectionKey>('overview')
 // Modal state (user mode only)
 const isModalOpen = ref(false)
 const modalTitle = ref('')
-const modalContent = ref<any>('')
+const modalContent = ref<unknown>('')
 const modalField = ref('')
 
 // Add chapter modal state (user mode only)
@@ -557,7 +557,7 @@ const componentProps = computed(() => {
   }
 })
 
-const handleSectionEdit = (payload: { field: string; title: string; value: any }) => {
+const handleSectionEdit = (payload: { field: string; title: string; value: unknown }) => {
   if (props.isAdmin) return
   modalField.value = payload.field
   modalTitle.value = payload.title
@@ -573,19 +573,19 @@ const resolveSectionKey = (field: string): SectionKey => {
   return 'overview'
 }
 
-const handleSave = async (data: { field: string; content: any }) => {
+const handleSave = async (data: { field: string; content: unknown }) => {
   if (props.isAdmin) return
   await ensureProjectLoaded()
   const project = novel.value
   if (!project) return
 
   const { field, content } = data
-  const payload: Record<string, any> = {}
+  const payload: Record<string, unknown> = {}
 
   if (field.includes('.')) {
     const [parentField, childField] = field.split('.')
     payload[parentField] = {
-      ...(project.blueprint?.[parentField as keyof typeof project.blueprint] as Record<string, any> | undefined),
+      ...(project.blueprint?.[parentField as keyof typeof project.blueprint] as Record<string, unknown> | undefined),
       [childField]: content
     }
   } else {
@@ -610,7 +610,7 @@ const startAddChapter = async () => {
   if (props.isAdmin) return
   await ensureProjectLoaded()
   const outline = sectionData.chapter_outline?.chapter_outline || novel.value?.blueprint?.chapter_outline || []
-  const nextNumber = outline.length > 0 ? Math.max(...outline.map((item: any) => item.chapter_number)) + 1 : 1
+  const nextNumber = outline.length > 0 ? Math.max(...outline.map(item => item.chapter_number)) + 1 : 1
   newChapterTitle.value = `新章节 ${nextNumber}`
   newChapterSummary.value = ''
   isAddChapterModalOpen.value = true

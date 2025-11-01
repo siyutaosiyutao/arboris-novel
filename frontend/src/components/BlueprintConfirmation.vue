@@ -130,6 +130,7 @@ import { marked } from 'marked'
 import { useNovelStore } from '@/stores/novel'
 import { globalAlert } from '@/composables/useAlert'
 import { logger } from '@/utils/logger'
+import type { BlueprintGenerationResponse } from '@/api/novel'
 
 // 配置 marked
 marked.setOptions({
@@ -144,7 +145,7 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  blueprintGenerated: [response: any]
+  blueprintGenerated: [response: BlueprintGenerationResponse]
   back: []
 }>()
 

@@ -67,11 +67,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { globalAlert } from '@/composables/useAlert'
-import type { Blueprint } from '@/api/novel'
+import type { Blueprint, Character, WorldSetting, Relationship } from '@/api/novel'
 
 interface DisplayField {
   label: string;
-  value: any;
+  value: unknown;
   priority: number;
 }
 
@@ -115,7 +115,7 @@ const formattedBlueprint = computed(() => {
   const blueprint = props.blueprint
 
   // Helper function to safely access nested properties
-  const safe = (value: any, fallback = '待补充') => value || fallback
+  const safe = (value: unknown, fallback = '待补充') => value || fallback
 
   // Create section with icon and styling
   const createSection = (title: string, content: string, icon: string) => `
@@ -143,7 +143,7 @@ const formattedBlueprint = computed(() => {
   }
 
   // Format characters with enhanced styling - 动态兼容所有字段
-  const formatCharacters = (characters: any[]) => {
+  const formatCharacters = (characters: Character[]) => {
     if (!characters || characters.length === 0) return '<p class="text-gray-500 italic">暂无角色信息</p>'
 
     return characters.map(char => {
@@ -291,12 +291,12 @@ const formattedBlueprint = computed(() => {
   }
 
   // Format world setting with enhanced styling
-  const formatWorldSetting = (worldSetting: any) => {
+  const formatWorldSetting = (worldSetting: WorldSetting) => {
     if (!worldSetting || typeof worldSetting !== 'object') return '<p class="text-gray-500 italic">暂无世界设定信息</p>'
 
     let html = ''
 
-    if (worldSetting.core_rules) {
+    if ('core_rules' in worldSetting && worldSetting.core_rules) {
       html += `
         <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
           <h4 class="font-semibold text-amber-800 mb-2 flex items-center">
@@ -316,7 +316,7 @@ const formattedBlueprint = computed(() => {
             关键地点
           </h4>
           <div class="grid gap-3">
-            ${worldSetting.key_locations.map((loc: any) => `
+            ${worldSetting.key_locations.map(loc => `
               <div class="bg-teal-50 border-l-3 border-teal-400 p-3 rounded-r-lg">
                 <h5 class="font-medium text-teal-800">${loc.name}</h5>
                 <p class="text-teal-700 text-sm mt-1">${loc.description}</p>
@@ -335,7 +335,7 @@ const formattedBlueprint = computed(() => {
             主要势力
           </h4>
           <div class="grid gap-3">
-            ${worldSetting.factions.map((fac: any) => `
+            ${worldSetting.factions.map(fac => `
               <div class="bg-purple-50 border-l-3 border-purple-400 p-3 rounded-r-lg">
                 <h5 class="font-medium text-purple-800">${fac.name}</h5>
                 <p class="text-purple-700 text-sm mt-1">${fac.description}</p>
@@ -350,7 +350,7 @@ const formattedBlueprint = computed(() => {
   }
 
   // Format relationships with enhanced styling - 支持新的数据结构
-  const formatRelationships = (relationships: any[]) => {
+  const formatRelationships = (relationships: Relationship[]) => {
     if (!relationships || relationships.length === 0) return '<p class="text-gray-500 italic">暂无关系设定</p>'
 
     return `
