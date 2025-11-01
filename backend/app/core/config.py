@@ -7,6 +7,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL, make_url
 
 
+BASE_DIR = Path(__file__).resolve().parents[2]
+REPO_ROOT = BASE_DIR.parent
+
+
 class Settings(BaseSettings):
     """应用全局配置，所有可调参数集中于此，统一加载自环境变量。"""
 
@@ -181,7 +185,12 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"),
+        env_file=(
+            ".env",
+            "../.env",
+            BASE_DIR / ".env",
+            REPO_ROOT / ".env",
+        ),
         env_file_encoding="utf-8",
         extra="ignore"
     )
