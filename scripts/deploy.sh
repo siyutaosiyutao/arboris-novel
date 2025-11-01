@@ -81,7 +81,8 @@ check_npm() {
 }
 
 # 获取项目根目录
-PROJECT_DIR=$(cd "$(dirname "$0")" && pwd)
+# 脚本位于项目的 scripts/ 目录内，因此需要回到上一层
+PROJECT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 BACKEND_DIR="$PROJECT_DIR/backend"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 
