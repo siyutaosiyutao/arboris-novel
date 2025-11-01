@@ -247,6 +247,7 @@ import { useAuthStore } from '@/stores/auth'
 import { NovelAPI } from '@/api/novel'
 import { AdminAPI } from '@/api/admin'
 import type { NovelProject, NovelSectionResponse, NovelSectionType } from '@/api/novel'
+import { logger } from '@/utils/logger'
 import BlueprintEditModal from '@/components/BlueprintEditModal.vue'
 import OverviewSection from '@/components/novel-detail/OverviewSection.vue'
 import WorldSettingSection from '@/components/novel-detail/WorldSettingSection.vue'
@@ -372,7 +373,7 @@ const activeSection = ref<SectionKey>('overview')
 // Modal state (user mode only)
 const isModalOpen = ref(false)
 const modalTitle = ref('')
-const modalContent = ref<any>('')
+const modalContent = ref<unknown>('')
 const modalField = ref('')
 
 // Add chapter modal state (user mode only)
@@ -439,7 +440,7 @@ const loadSection = async (section: SectionKey, force = false) => {
       overviewMeta.updated_at = response.data?.updated_at || null
     }
   } catch (error) {
-    console.error('加载模块失败:', error)
+    logger.error('加载模块失败:', error)
     sectionError[section] = error instanceof Error ? error.message : '加载失败'
   } finally {
     sectionLoading[section] = false
@@ -504,9 +505,9 @@ const exportAllChapters = async () => {
     window.URL.revokeObjectURL(url)
     document.body.removeChild(a)
 
-    console.log('导出成功')
+    logger.info('导出成功')
   } catch (error) {
-    console.error('导出失败:', error)
+    logger.error('导出失败:', error)
     alert('导出失败: ' + (error instanceof Error ? error.message : '未知错误'))
   } finally {
     isExporting.value = false
@@ -556,7 +557,7 @@ const componentProps = computed(() => {
   }
 })
 
-const handleSectionEdit = (payload: { field: string; title: string; value: any }) => {
+const handleSectionEdit = (payload: { field: string; title: string; value: unknown }) => {
   if (props.isAdmin) return
   modalField.value = payload.field
   modalTitle.value = payload.title
@@ -572,19 +573,19 @@ const resolveSectionKey = (field: string): SectionKey => {
   return 'overview'
 }
 
-const handleSave = async (data: { field: string; content: any }) => {
+const handleSave = async (data: { field: string; content: unknown }) => {
   if (props.isAdmin) return
   await ensureProjectLoaded()
   const project = novel.value
   if (!project) return
 
   const { field, content } = data
-  const payload: Record<string, any> = {}
+  const payload: Record<string, unknown> = {}
 
   if (field.includes('.')) {
     const [parentField, childField] = field.split('.')
     payload[parentField] = {
-      ...(project.blueprint?.[parentField as keyof typeof project.blueprint] as Record<string, any> | undefined),
+      ...(project.blueprint?.[parentField as keyof typeof project.blueprint] as Record<string, unknown> | undefined),
       [childField]: content
     }
   } else {
@@ -601,7 +602,7 @@ const handleSave = async (data: { field: string; content: any }) => {
     }
     isModalOpen.value = false
   } catch (error) {
-    console.error('保存变更失败:', error)
+    logger.error('保存变更失败:', error)
   }
 }
 
@@ -609,7 +610,7 @@ const startAddChapter = async () => {
   if (props.isAdmin) return
   await ensureProjectLoaded()
   const outline = sectionData.chapter_outline?.chapter_outline || novel.value?.blueprint?.chapter_outline || []
-  const nextNumber = outline.length > 0 ? Math.max(...outline.map((item: any) => item.chapter_number)) + 1 : 1
+  const nextNumber = outline.length > 0 ? Math.max(...outline.map(item => item.chapter_number)) + 1 : 1
   newChapterTitle.value = `新章节 ${nextNumber}`
   newChapterSummary.value = ''
   isAddChapterModalOpen.value = true
@@ -643,7 +644,7 @@ const saveNewChapter = async () => {
     await loadSection('chapter_outline', true)
     isAddChapterModalOpen.value = false
   } catch (error) {
-    console.error('新增章节失败:', error)
+    logger.error('新增章节失败:', error)
   }
 }
 

@@ -1,13 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { NovelProject, NovelProjectSummary, ConverseResponse, BlueprintGenerationResponse, Blueprint, DeleteNovelsResponse, ChapterOutline } from '@/api/novel'
+import type { NovelProject, NovelProjectSummary, ConverseResponse, BlueprintGenerationResponse, Blueprint, DeleteNovelsResponse, ChapterOutline, UserInput, ConversationState } from '@/api/novel'
 import { NovelAPI } from '@/api/novel'
 
 export const useNovelStore = defineStore('novel', () => {
   // State
   const projects = ref<NovelProjectSummary[]>([])
   const currentProject = ref<NovelProject | null>(null)
-  const currentConversationState = ref<any>({})
+  const currentConversationState = ref<ConversationState>({})
   const isLoading = ref(false)
   const error = ref<string | null>(null)
 
@@ -85,7 +85,7 @@ export const useNovelStore = defineStore('novel', () => {
     }
   }
 
-  async function sendConversation(userInput: any): Promise<ConverseResponse> {
+  async function sendConversation(userInput: UserInput | null): Promise<ConverseResponse> {
     isLoading.value = true
     error.value = null
     try {

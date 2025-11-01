@@ -124,6 +124,7 @@ import BlueprintConfirmation from '@/components/BlueprintConfirmation.vue'
 import BlueprintDisplay from '@/components/BlueprintDisplay.vue'
 import InspirationLoading from '@/components/InspirationLoading.vue'
 import { globalAlert } from '@/composables/useAlert'
+import { logger } from '@/utils/logger'
 
 interface ChatMessage {
   content: string
@@ -199,7 +200,7 @@ const startConversation = async () => {
     // 发起第一次对话
     await handleUserInput(null)
   } catch (error) {
-    console.error('启动灵感模式失败:', error)
+    logger.error('启动灵感模式失败:', error)
     globalAlert.showError(`无法开始灵感模式: ${error instanceof Error ? error.message : '未知错误'}`, '启动失败')
     resetInspirationMode() // 失败时重置回初始状态
   }
@@ -250,7 +251,7 @@ const restoreConversation = async (projectId: string) => {
       await scrollToBottom()
     }
   } catch (error) {
-    console.error('恢复对话失败:', error)
+    logger.error('恢复对话失败:', error)
     globalAlert.showError(`无法恢复对话: ${error instanceof Error ? error.message : '未知错误'}`, '加载失败')
     resetInspirationMode()
   }
@@ -298,7 +299,7 @@ const handleUserInput = async (userInput: any) => {
       currentUIControl.value = response.ui_control
     }
   } catch (error) {
-    console.error('对话失败:', error)
+    logger.error('对话失败:', error)
     // 确保在出错时也停止初始加载状态
     if (isInitialLoading.value) {
       isInitialLoading.value = false
@@ -314,13 +315,13 @@ const handleGenerateBlueprint = async () => {
     const response = await novelStore.generateBlueprint()
     handleBlueprintGenerated(response)
   } catch (error) {
-    console.error('生成蓝图失败:', error)
+    logger.error('生成蓝图失败:', error)
     globalAlert.showError(`生成蓝图失败: ${error instanceof Error ? error.message : '未知错误'}`, '生成失败')
   }
 }
 
 const handleBlueprintGenerated = (response: any) => {
-  console.log('收到蓝图生成完成事件:', response)
+  logger.debug('收到蓝图生成完成事件:', response)
   completedBlueprint.value = response.blueprint
   // ✅ 修复：确保 ai_message 是字符串，避免显示 [object Object]
   blueprintMessage.value = typeof response.ai_message === 'string'
@@ -347,7 +348,7 @@ const handleConfirmBlueprint = async () => {
       router.push(`/novel/${novelStore.currentProject.id}`)
     }
   } catch (error) {
-    console.error('保存蓝图失败:', error)
+    logger.error('保存蓝图失败:', error)
     globalAlert.showError(`保存蓝图失败: ${error instanceof Error ? error.message : '未知错误'}`, '保存失败')
   }
 }

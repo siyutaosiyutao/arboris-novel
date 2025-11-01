@@ -547,8 +547,9 @@ class AutoGeneratorService:
             if settings.vector_store_enabled:
                 try:
                     vector_store = VectorStoreService()
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to initialize VectorStoreService: {e}")
+                    vector_store = None
 
             context_service = ChapterContextService(llm_service=llm_service, vector_store=vector_store)
             rag_context = await context_service.retrieve_for_generation(
@@ -608,7 +609,8 @@ class AutoGeneratorService:
                 normalized = unwrap_markdown_json(cleaned)
                 try:
                     raw_versions.append(json.loads(normalized))
-                except:
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.debug(f"Failed to parse JSON response, using raw content: {e}")
                     raw_versions.append({"content": normalized})
 
             # 提取内容
@@ -1528,7 +1530,8 @@ class AutoGeneratorService:
         if isinstance(world_setting, str):
             try:
                 world_setting = json.loads(world_setting)
-            except:
+            except json.JSONDecodeError as e:
+                logger.debug(f"Failed to parse world_setting JSON: {e}")
                 world_setting = {}
 
         # 扩展世界观元素
